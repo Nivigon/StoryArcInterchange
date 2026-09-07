@@ -312,6 +312,7 @@
     return { v:VERSION, view:"home",
       roster: seed.map(function(s,i){return {id:"r"+i,name:s[0],line:s[1]};}),
       current:null, history:[], detailId:null, defaults:null,
+      presets:[], presetOutbox:[], presetDelOutbox:[], defaultPresetId:null,
       sync:{mode:"firebase",url:"",key:FB_KEY,table:FB_COLL,token:"",project:FB_PROJECT}, outbox:[] };
   }
   function migrateOrFresh(old){ return fresh(); }
@@ -457,7 +458,7 @@
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
-    if(state.defaults) applyDefault(state.current);
+    applyDefaultPreset(state.current);
     save(true); undoStack=[]; go("opstelling");
   }
   function applyDefault(m){
@@ -474,6 +475,73 @@
     var groups=(c.groups||[]).map(function(g){ return {color:g.color, members:(g.members||[]).filter(function(id){return rosterIds[id];})}; });
     state.defaults={lineup:lineup,groups:groups,rules:(c.rules||[]).slice(),talk:(c.talk||[]).slice()};
     save(true); toast("Standaard opgeslagen");
+  }
+
+  // ---------- presets (opstelling, groepjes, regels, voorbespreking) ----------
+  function ensurePresets(){
+    if(!state.presets)state.presets=[];
+    if(!state.presetOutbox)state.presetOutbox=[];
+    if(!state.presetDelOutbox)state.presetDelOutbox=[];
+    if(typeof state.defaultPresetId==="undefined")state.defaultPresetId=null;
+    // Zet de oude enkele standaard eenmalig om naar een preset met naam.
+    if(state.defaults && !state._defaultsMigrated){
+      var d=state.defaults;
+      var p={ id:"p_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), name:"Standaard", updatedAt:Date.now(),
+        lineup:d.lineup||{},
+        groups:(d.groups||[]).map(function(g){return {color:g.color,members:(g.members||[]).slice()};}),
+        rules:(d.rules||[]).slice(), talk:(d.talk||[]).slice() };
+      state.presets.push(p); state.defaultPresetId=p.id; state._defaultsMigrated=true;
+      if(state.presetOutbox.indexOf(p.id)<0)state.presetOutbox.push(p.id);
+    }
+  }
+  function presetById(id){ ensurePresets(); for(var i=0;i<state.presets.length;i++)if(state.presets[i].id===id)return state.presets[i]; return null; }
+  function applyPresetToMatch(m,p){ if(!m||!p)return;
+    m.players.forEach(function(pl){ if(pl.rosterId!=null && p.lineup && p.lineup[pl.rosterId]) pl.pos=p.lineup[pl.rosterId]; else pl.pos=null; });
+    m.groups=(p.groups||[]).map(function(g){ return {id:"g_"+Math.random().toString(36).slice(2), color:g.color, members:(g.members||[]).slice()}; });
+    m.rules=(p.rules||[]).slice(); m.talk=(p.talk||[]).slice();
+  }
+  function applyDefaultPreset(m){ ensurePresets(); if(!state.defaultPresetId)return; var p=presetById(state.defaultPresetId); if(p)applyPresetToMatch(m,p); }
+  function savePreset(){
+    var c=cur(); if(!c)return;
+    var el=document.getElementById("presetName"); var name=(el&&el.value||"").trim();
+    if(!name){ toast("Geef de preset een naam"); return; }
+    ensurePresets();
+    var rosterIds={}; state.roster.forEach(function(r){rosterIds[r.id]=true;});
+    var lineup={}; c.players.forEach(function(pl){ if(pl.rosterId!=null && pl.pos) lineup[pl.rosterId]=pl.pos; });
+    var groups=(c.groups||[]).map(function(g){ return {color:g.color, members:(g.members||[]).filter(function(id){return rosterIds[id];})}; });
+    var ex=null; for(var i=0;i<state.presets.length;i++)if((state.presets[i].name||"").toLowerCase()===name.toLowerCase())ex=state.presets[i];
+    var p = ex || { id:"p_"+Date.now()+"_"+Math.random().toString(36).slice(2,6) };
+    p.name=name; p.lineup=lineup; p.groups=groups; p.rules=(c.rules||[]).slice(); p.talk=(c.talk||[]).slice(); p.updatedAt=Date.now();
+    if(!ex)state.presets.push(p);
+    queuePreset(p.id);
+    save(true); if(el)el.value=""; renderOpstelling();
+    toast((ex?"Preset bijgewerkt: ":"Preset opgeslagen: ")+name); syncNow(false);
+  }
+  function delPreset(id){
+    var p=presetById(id); if(!p)return;
+    if(!confirm("Preset \""+p.name+"\" verwijderen?"))return;
+    state.presets=state.presets.filter(function(x){return x.id!==id;});
+    removePresetOutbox(id);
+    if(state.presetDelOutbox.indexOf(id)<0)state.presetDelOutbox.push(id);
+    if(state.defaultPresetId===id)state.defaultPresetId=null;
+    save(true); renderOpstelling(); toast("Preset verwijderd"); syncNow(false);
+  }
+  function setDefaultPreset(id){
+    ensurePresets();
+    state.defaultPresetId=(state.defaultPresetId===id?null:id);
+    save(true); renderOpstelling();
+    toast(state.defaultPresetId?"Ingesteld als start voor nieuwe wedstrijden":"Start losgekoppeld");
+  }
+  function presetRows(){
+    ensurePresets();
+    if(!state.presets.length)return '<div class="rl empty2">Nog geen presets</div>';
+    return state.presets.map(function(p){
+      var isDef=state.defaultPresetId===p.id;
+      return '<div class="rl"><span style="flex:1">'+esc(p.name)+(isDef?' <b>(start)</b>':'')+'</span>'+
+        '<button class="mini" data-action="preset-apply" data-id="'+p.id+'">Gebruik</button>'+
+        '<button class="mini" data-action="preset-default" data-id="'+p.id+'">'+(isDef?'Geen start':'Als start')+'</button>'+
+        '<button class="btn row-x" data-action="preset-del" data-id="'+p.id+'">&times;</button></div>';
+    }).join("");
   }
   function commitLineup(){ var c=cur(); if(!c)return; c.players.forEach(function(p){ p.onField=!!p.pos; }); grpMode=false; activeGroup=null; rolMode=false; activeRole=null; }
   function finishMatch(){
@@ -748,10 +816,10 @@
        '<div class="addrow" style="margin-top:8px"><input id="ruleInput" type="text" placeholder="Bijv. Lage spits: Luna of Maud"><button class="btn" data-action="rule-add" style="width:auto">Toevoegen</button></div></div>'+
        '<div class="rulesbox"><div class="rl-h">VOORBESPREKING</div>'+talkRows(true)+
        '<div class="addrow" style="margin-top:8px"><input id="talkInput" type="text" placeholder="Bijv. Druk hoog, samen naar voren"><button class="btn" data-action="talk-add" style="width:auto">Toevoegen</button></div></div>'+
-       '<div class="rulesbox"><div class="rl-h">STANDAARD</div>'+
-       '<p class="sub">Bewaar deze opstelling, groepjes, regels en voorbespreking als vaste start voor nieuwe wedstrijden.</p>'+
-       '<div class="two"><button class="btn" data-action="save-default">Bewaar als standaard</button>'+
-       '<button class="btn light" data-action="apply-default">Herstel standaard</button></div></div>';
+       '<div class="rulesbox"><div class="rl-h">PRESETS</div>'+
+       '<p class="sub">Sla deze opstelling, groepjes, regels en voorbespreking op onder een naam. Presets staan op al je tablets. Kies er een als vaste start voor nieuwe wedstrijden.</p>'+
+       '<div class="addrow"><input id="presetName" type="text" placeholder="Naam, bijv. 3-3-3 of tegen kopploeg"><button class="btn" data-action="preset-save" style="width:auto">Opslaan</button></div>'+
+       presetRows()+'</div>';
     h+='</div>'; // side
     h+='</div></div>'; // board-top, board
     h+='</div>'; // screen
@@ -1030,8 +1098,10 @@
       case "talk-add": addTalk(); break;
       case "talk-del": delTalk(parseInt(id,10)); break;
       case "talk-prompt": promptTalk(); break;
-      case "save-default": saveDefault(); break;
-      case "apply-default": if(!state.defaults){toast("Nog geen standaard opgeslagen");} else if(confirm("Huidige opstelling, groepjes, regels en voorbespreking vervangen door de opgeslagen standaard?")){ applyDefault(cur()); activeGroup=null; save(true); renderOpstelling(); toast("Standaard hersteld"); } break;
+      case "preset-save": savePreset(); break;
+      case "preset-apply": if(confirm("Huidige opstelling, groepjes, regels en voorbespreking vervangen door deze preset?")){ applyPresetToMatch(cur(),presetById(id)); activeGroup=null; save(true); renderOpstelling(); toast("Preset toegepast"); } break;
+      case "preset-default": setDefaultPreset(id); break;
+      case "preset-del": delPreset(id); break;
       case "undo": doUndo(); break;
       case "next-quarter": nextQuarter(); break;
       case "card-open": if(cur().selectedId){ cardOpen=true; cornerOpen=false; renderMatch(); } else toast("Kies eerst een speler"); break;
@@ -1245,6 +1315,9 @@
   function matchInHistory(id){for(var i=0;i<state.history.length;i++)if(state.history[i].id===id)return state.history[i];return null;}
   function queueMatch(id){ if(state.outbox.indexOf(id)<0)state.outbox.push(id); }
   function removeOutbox(id){ state.outbox=state.outbox.filter(function(x){return x!==id;}); }
+  function queuePreset(id){ ensurePresets(); if(state.presetOutbox.indexOf(id)<0)state.presetOutbox.push(id);
+    state.presetDelOutbox=state.presetDelOutbox.filter(function(x){return x!==id;}); }
+  function removePresetOutbox(id){ ensurePresets(); state.presetOutbox=state.presetOutbox.filter(function(x){return x!==id;}); }
   function syncLabel(m){ if(!state.sync||state.sync.mode==="off")return "";
     if(m.synced)return "verzonden"; if(state.outbox.indexOf(m.id)>=0)return "wacht op internet";
     if(m.syncError)return "fout bij versturen"; return ""; }
@@ -1278,11 +1351,66 @@
     return fetch(s.url,{method:"POST",headers:headers,body:JSON.stringify(m)})
       .then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return true; });
   }
+  // Presets synchroniseren alleen in firebase-modus. Ze staan in een aparte
+  // collection 'presets', met een vast document-id per preset (upsert via PATCH).
+  function fbPresetUrl(id){ var s=state.sync;
+    return "https://firestore.googleapis.com/v1/projects/"+encodeURIComponent(s.project)+
+           "/databases/(default)/documents/presets"+(id?("/"+encodeURIComponent(id)):"")+"?key="+encodeURIComponent(s.key); }
+  function sendPreset(p){
+    var fields={fields:{
+      naam:{stringValue:String(p.name||"")},
+      updatedAt:{integerValue:String(p.updatedAt||0)},
+      data:{stringValue:JSON.stringify(p)}
+    }};
+    return fetch(fbPresetUrl(p.id),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields)})
+      .then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return true; });
+  }
+  function deletePresetRemote(id){
+    return fetch(fbPresetUrl(id),{method:"DELETE"})
+      .then(function(r){ if(!r.ok && r.status!==404)throw new Error("HTTP "+r.status); return true; });
+  }
+  function refreshPresetViews(){ if(state.view==="opstelling")renderOpstelling(); else if(state.view==="sync")renderSync(); }
+  function mergePresets(remote){
+    ensurePresets(); var changed=false;
+    remote.forEach(function(r){
+      if(!r||!r.id)return;
+      if(state.presetDelOutbox.indexOf(r.id)>=0)return; // deze willen we juist verwijderen
+      var l=presetById(r.id);
+      if(!l){ state.presets.push(r); changed=true; }
+      else if((r.updatedAt||0)>(l.updatedAt||0)){ for(var k in r){ if(r.hasOwnProperty(k))l[k]=r[k]; } changed=true; }
+    });
+    if(changed){ save(true); refreshPresetViews(); }
+    return changed;
+  }
+  function pullPresets(){
+    ensureSync(); var s=state.sync;
+    if(s.mode!=="firebase"||!s.project||!s.key||!navigator.onLine)return Promise.resolve(false);
+    return fetch(fbPresetUrl("")+"&pageSize=300")
+      .then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(j){
+        var docs=(j&&j.documents)||[]; var remote=[];
+        docs.forEach(function(d){ try{ var raw=d.fields&&d.fields.data&&d.fields.data.stringValue; if(!raw)return;
+          var p=JSON.parse(raw); if(p&&p.id)remote.push(p); }catch(e){} });
+        return mergePresets(remote);
+      }).catch(function(){ return false; });
+  }
+  function flushPresets(){
+    var s=state.sync; if(s.mode!=="firebase")return;
+    state.presetOutbox.slice().forEach(function(id){
+      var p=presetById(id); if(!p){ removePresetOutbox(id); return; }
+      sendPreset(p).then(function(){ removePresetOutbox(id); save(true); refreshPresetViews(); }).catch(function(){});
+    });
+    state.presetDelOutbox.slice().forEach(function(id){
+      deletePresetRemote(id).then(function(){ state.presetDelOutbox=state.presetDelOutbox.filter(function(x){return x!==id;}); save(true); }).catch(function(){});
+    });
+  }
   function syncNow(manual){
     ensureSync();
     if(state.sync.mode==="off"){ if(manual)toast("Sync staat uit"); return; }
     if(!navigator.onLine){ if(manual)toast("Geen internet, blijft in de wachtrij"); return; }
-    if(!state.outbox.length){ if(manual)toast("Niets te versturen"); return; }
+    if(manual)pullPresets();
+    var pendPreset=(state.presetOutbox.length+state.presetDelOutbox.length)>0;
+    if(!state.outbox.length && !pendPreset){ if(manual)toast("Niets te versturen"); return; }
     state.outbox.slice().forEach(function(id){
       var m=matchInHistory(id); if(!m){ removeOutbox(id); return; }
       sendMatch(m).then(function(){
@@ -1295,6 +1423,7 @@
         if(manual)toast("Versturen mislukt");
       });
     });
+    flushPresets();
   }
 
   function renderSync(){
@@ -1334,7 +1463,7 @@
       state.sync.table=document.getElementById("supaTable").value.trim()||"wedstrijden"; }
     else if(mode==="url"){ state.sync.url=document.getElementById("urlUrl").value.trim();
       state.sync.token=document.getElementById("urlToken").value.trim(); }
-    save(true); toast("Opgeslagen"); renderSync(); syncNow(false);
+    save(true); toast("Opgeslagen"); renderSync(); syncNow(false); pullPresets();
   }
   document.getElementById("importFile").addEventListener("change",function(ev){
     var f=ev.target.files[0];if(!f)return;var rd=new FileReader();
@@ -1371,12 +1500,14 @@
 
   // ---------- boot ----------
   ensureSync();
+  ensurePresets();
   applyRoleDefaults();
   if(cur())cur().lastTick=Date.now();
   renderView();
   setInterval(tick,500);
-  window.addEventListener("online",function(){ syncNow(false); });
+  window.addEventListener("online",function(){ syncNow(false); pullPresets(); });
   syncNow(false);
+  pullPresets();
   document.addEventListener("visibilitychange",function(){if(!document.hidden&&cur()){cur().lastTick=Date.now();refreshDynamic();}});
   window.addEventListener("beforeunload",function(){save(true);});
 })();
