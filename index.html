@@ -40,6 +40,8 @@
   .hbench .tb-strip,.huit .tb-strip{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.4) transparent}
   .huit .tb-strip{background:rgba(255,255,255,.08);border:1px dashed rgba(255,255,255,.4);border-radius:10px;padding:5px;min-height:50px}
   .hbench .chip,.huit .chip{flex-shrink:0}
+  /* Wissels breken af naar een tweede regel in plaats van zijwaarts te scrollen. */
+  .hbench .tb-strip{flex-wrap:wrap;overflow-x:hidden}
   .tb-h{color:#cfe9d8;font-size:.68rem;font-weight:800;letter-spacing:.06em;margin:0 2px 3px}
   .tb-empty{color:rgba(255,255,255,.6);font-size:.82rem;font-weight:600;padding:0 6px;white-space:nowrap}
   @media (max-width:640px){
@@ -53,11 +55,14 @@
   .hmeta .hlabel{font-weight:800;color:#fff;margin-right:8px}
   .qpill{display:inline-block;background:rgba(255,255,255,.16);color:#fff;font-weight:800;padding:2px 9px;border-radius:20px;font-size:.8rem;margin-right:4px;cursor:pointer}
   .clock.over{color:#ffcc00}
-  .scorebar{display:flex;align-items:center;gap:6px;margin-top:5px}
+  .scorebar{display:flex;align-items:center;gap:8px;margin-top:5px}
+  .scgrp{display:flex;align-items:center;gap:5px}
+  .scdash{color:#cfe9d8;font-weight:800;font-size:1.05rem}
   .scbtn{width:30px;height:30px;border-radius:8px;border:0;font-weight:800;font-size:1.15rem;line-height:1;cursor:pointer;padding:0}
   .scbtn.plus{background:#c8e000;color:#173a12}
   .scbtn.minus{background:#d62828;color:#fff}
-  .scoreval{background:#fff;color:#12261a;border-radius:8px;padding:4px 12px;font-weight:800;font-variant-numeric:tabular-nums;font-size:1.02rem;cursor:pointer}
+  .scbtn.del{width:22px;height:22px;font-size:1rem;background:rgba(255,255,255,.28);color:#fff}
+  .scoreval{background:#fff;color:#12261a;border-radius:8px;padding:4px 10px;font-weight:800;font-variant-numeric:tabular-nums;font-size:1.02rem;cursor:pointer;min-width:20px;text-align:center}
   .scorepanel{position:fixed;top:118px;left:12px;background:#fff;border:1px solid var(--line);border-radius:12px;
     box-shadow:0 10px 28px rgba(0,0,0,.28);padding:10px 12px;z-index:50;min-width:240px;max-width:340px;max-height:72vh;overflow:auto}
   .coachbtn.undo{color:var(--accent);border-color:var(--accent)}
@@ -246,9 +251,9 @@
   .chip.mfield{display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 13px;min-width:68px;line-height:1.05}
   .chip.mfield .mn{font-size:1.12rem}
   .chip.mfield .mt{display:none;font-size:.98rem;font-weight:800;opacity:1;font-variant-numeric:tabular-nums}
-  .chip.mbench{display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 14px;min-width:86px}
-  .chip.mbench .mn{font-size:1.16rem}
-  .chip.mbench .mt{font-size:.92rem;color:#12261a;font-weight:800;font-variant-numeric:tabular-nums}
+  .chip.mbench{display:flex;flex-direction:column;align-items:center;gap:0;padding:5px 9px;min-width:0}
+  .chip.mbench .mn{font-size:.92rem}
+  .chip.mbench .mt{font-size:.72rem;color:#12261a;font-weight:800;font-variant-numeric:tabular-nums}
   .chip.mbench .mt2{font-size:.82rem;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
   .chip.mfield .mt2{font-size:.78rem;font-weight:700;opacity:.9;font-variant-numeric:tabular-nums}
   .chip .mt2{display:none}
@@ -381,6 +386,10 @@
     c.goals.push({id:"g"+Date.now(),team:team,q:c.quarter,t:Math.round(c.elapsed),on:field().map(function(p){return p.name;}),off:bench().map(function(p){return p.name;})});
     save(true); renderMatch(); toast(team==="voor"?"Doelpunt voor":"Tegendoelpunt"); }
   function delGoal(gid){ var c=cur(); c.goals=(c.goals||[]).filter(function(x){return x.id!==gid;}); save(true); renderMatch(); }
+  function removeGoal(team){ var c=cur(); if(!c||!c.goals||!c.goals.length){ toast(team==="voor"?"Geen doelpunt voor":"Geen tegendoelpunt"); return; }
+    var idx=-1; for(var i=0;i<c.goals.length;i++)if(c.goals[i].team===team)idx=i; // laatste van deze kant
+    if(idx<0){ toast(team==="voor"?"Geen doelpunt voor om weg te halen":"Geen tegendoelpunt om weg te halen"); return; }
+    c.goals.splice(idx,1); save(true); renderMatch(); toast(team==="voor"?"Doelpunt voor weggehaald":"Tegendoelpunt weggehaald"); }
   function scorePanel(){ if(!scoreOpen)return ""; var c=cur(); var g=(c.goals||[]).slice().sort(function(a,b){return a.t-b.t;});
     var voor=g.filter(function(x){return x.team==="voor";}).length, tegen=g.filter(function(x){return x.team==="tegen";}).length;
     var per={}; g.forEach(function(x){
@@ -634,9 +643,14 @@
     h+='<header>'+
        '<div class="hleft"><div id="clock" class="clock">'+fmt(c.qElapsed||0)+'</div>'+
          '<div class="hmeta"><span class="qpill" data-action="next-quarter">Kwart <span id="qnum">'+c.quarter+'</span> &#9654;</span> <span id="fieldCount"></span> &middot; <span id="stateLbl"></span></div>'+
-         '<div class="scorebar"><button class="scbtn plus" data-action="goal-voor" title="Doelpunt voor">+</button>'+
-           '<span class="scoreval" data-action="score-open">'+gV+' - '+gT+'</span>'+
-           '<button class="scbtn minus" data-action="goal-tegen" title="Tegendoelpunt">&minus;</button></div>'+
+         '<div class="scorebar">'+
+           '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="voor" title="Doelpunt voor eraf">&minus;</button>'+
+             '<span class="scoreval" data-action="score-open" title="Details">'+gV+'</span>'+
+             '<button class="scbtn plus" data-action="goal-voor" title="Doelpunt voor">+</button></span>'+
+           '<span class="scdash">&ndash;</span>'+
+           '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="tegen" title="Tegendoelpunt eraf">&minus;</button>'+
+             '<span class="scoreval" data-action="score-open" title="Details">'+gT+'</span>'+
+             '<button class="scbtn plus" data-action="goal-tegen" title="Tegendoelpunt">+</button></span></div>'+
        '</div>'+
        '<div class="hbench"><div class="tb-h">WISSELS ('+bs.n+')</div><div class="tb-strip" id="benchStrip">'+bs.html+'</div></div>'+
        '<div class="huit" data-uit><div class="tb-h">UIT</div><div class="tb-strip">'+uitStripInner()+'</div></div>'+
@@ -1109,6 +1123,7 @@
       case "card-close": cardOpen=false; renderMatch(); break;
       case "goal-voor": addGoal("voor"); break;
       case "goal-tegen": addGoal("tegen"); break;
+      case "goal-undo": removeGoal(id); break;
       case "score-open": scoreOpen=!scoreOpen; renderMatch(); break;
       case "score-close": scoreOpen=false; renderMatch(); break;
       case "goal-del": delGoal(id); break;
