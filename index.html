@@ -293,6 +293,21 @@
     {id:"VL",x:20,y:72},{id:"VC",x:50,y:80},{id:"VR",x:80,y:72},
     {id:"K",x:50,y:95}
   ];
+  // Testmodus: kleine veldindelingen voor een oefenpartijtje. Keeper staat
+  // onderaan, net als in de gewone opstelling. De aantallen zijn keeper plus
+  // de lijnen die bij 5 tegen 5 en 6 tegen 6 horen.
+  var FORMATION_5 = [
+    {id:"AAL",x:32,y:18},{id:"AAR",x:68,y:18},
+    {id:"MID",x:50,y:48},
+    {id:"VDL",x:32,y:74},{id:"VDR",x:68,y:74},
+    {id:"K",x:50,y:95}
+  ];
+  var FORMATION_6 = [
+    {id:"AAL",x:32,y:18},{id:"AAR",x:68,y:18},
+    {id:"MID",x:50,y:46},
+    {id:"VDL",x:20,y:72},{id:"VDC",x:50,y:72},{id:"VDR",x:80,y:72},
+    {id:"K",x:50,y:95}
+  ];
   var STINT_FULL = 8 * 60;
   // Veiligheidsnet: zoveel minuten na de eerste keer Start wordt een
   // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
@@ -344,7 +359,8 @@
     if(t<0.5){u=t/0.5;r=c1[0]+(c2[0]-c1[0])*u;g=c1[1]+(c2[1]-c1[1])*u;b=c1[2]+(c2[2]-c1[2])*u;}
     else{u=(t-0.5)/0.5;r=c2[0]+(c3[0]-c2[0])*u;g=c2[1]+(c3[1]-c2[1])*u;b=c2[2]+(c3[2]-c2[2])*u;}
     return {bg:"rgb("+Math.round(r)+","+Math.round(g)+","+Math.round(b)+")",ink:t>0.45?"#ffffff":"#12261a"};}
-  var POSGRP={SPL:"spits",SPR:"spits",LS:"spits",MZL:"mz",MZR:"mz",VML:"vm",VMR:"vm",VL:"achter",VC:"achter",VR:"achter",K:"keeper"};
+  var POSGRP={SPL:"spits",SPR:"spits",LS:"spits",MZL:"mz",MZR:"mz",VML:"vm",VMR:"vm",VL:"achter",VC:"achter",VR:"achter",K:"keeper",
+    AAL:"spits",AAR:"spits",MID:"mz",VDL:"achter",VDC:"achter",VDR:"achter"};
   function rankShade(t){t=Math.max(0,Math.min(1,t));var a=[255,255,255],b=[31,41,55];
     var r=Math.round(a[0]+(b[0]-a[0])*t),g=Math.round(a[1]+(b[1]-a[1])*t),bl=Math.round(a[2]+(b[2]-a[2])*t);
     return {bg:"rgb("+r+","+g+","+bl+")",ink:t>0.5?"#ffffff":"#12261a"};}
@@ -372,6 +388,9 @@
   }
 
   var cur=function(){return state.current;};
+  // Welke veldplekken gelden voor de huidige wedstrijd. Testwedstrijden
+  // gebruiken een klein veld; alle andere wedstrijden de vaste 11-opstelling.
+  function positions(){ var c=cur(), f=c&&c.format; if(f==="5")return FORMATION_5; if(f==="6")return FORMATION_6; return POSITIONS; }
   function mById(id){var c=cur();if(!c)return null;for(var i=0;i<c.players.length;i++)if(c.players[i].id===id)return c.players[i];return null;}
   function present(){var c=cur();return c?c.players.filter(function(p){return p.present;}):[];}
   function field(){return present().filter(function(p){return !!p.pos;});}
@@ -481,7 +500,7 @@
     var opp=(document.getElementById("oppName").value||"").trim();
     var lbl = opp ? (opp+(newThuis?" (thuis)":" (uit)")) : ("Wedstrijd "+datum());
     state.current = {
-      id:"m_"+Date.now(), label:lbl, opponent:opp, thuis:newThuis,
+      id:"m_"+Date.now(), label:lbl, opponent:opp, thuis:newThuis, format:"11",
       date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
@@ -598,6 +617,7 @@
   function renderView(){
     var v=state.view;
     if(v==="home") renderHome();
+    else if(v==="test") renderTest();
     else if(v==="nieuw") renderNieuw();
     else if(v==="opstelling") renderOpstelling();
     else if(v==="match") renderMatch();
@@ -615,6 +635,7 @@
     h+='<div><div class="logo">Interchange</div><div class="tag">AMHC &middot; wissels en speeltijd</div></div>';
     if(c){h+='<button class="bigbtn resume" data-action="resume"><span>Verder met huidige wedstrijd<br><small>'+esc(c.label)+' &middot; '+fmt(c.elapsed)+(c.running?' &middot; klok loopt':'')+'</small></span><span>&raquo;</span></button>';}
     h+='<button class="bigbtn play" data-action="new-match"><span>Nieuwe wedstrijd</span><span>+</span></button>';
+    h+='<button class="bigbtn ghost" data-action="open-test"><span>Test modus<br><small>5 tegen 5 of 6 tegen 6 om te oefenen</small></span><span>&#9654;</span></button>';
     h+='<button class="bigbtn ghost" data-action="open-history"><span>Oude wedstrijden</span><span>'+state.history.length+'</span></button>';
     h+='<button class="bigbtn ghost" data-action="open-team"><span>Team beheren</span><span>'+state.roster.length+'</span></button>';
     h+='<button class="bigbtn ghost" data-action="open-sync"><span>Synchronisatie</span><span>'+(state.sync&&state.sync.mode!=="off"?"aan":"uit")+'</span></button>';
@@ -704,7 +725,7 @@
     var c=cur();
     var placed={}; c.players.forEach(function(p){if(p.pos)placed[p.pos]=p;});
     var dots="";
-    POSITIONS.forEach(function(pos){
+    positions().forEach(function(pos){
       var p=placed[pos.id];
       if(p){
         var cls="chip on mfield"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-out";
@@ -774,6 +795,30 @@
     }
   }
 
+  // ---------- test modus ----------
+  function renderTest(){
+    var h='<div class="screen"><div class="topbar"><h2>Test modus</h2>'+
+      '<button class="hbtn" data-action="home">Terug</button></div><div class="body">';
+    h+='<div class="sec"><p class="sub">Een oefenpartijtje op een klein veld zodat de meisjes kunnen wennen. De klok, kwarten, wissels en speeltijd werken precies zoals bij een gewone wedstrijd.</p></div>';
+    h+='<div style="display:flex;flex-direction:column;gap:12px">';
+    h+='<button class="bigbtn play" data-action="test-5"><span>5 tegen 5<br><small>keeper, 2 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
+    h+='<button class="bigbtn play" data-action="test-6"><span>6 tegen 6<br><small>keeper, 3 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
+    h+='</div></div></div>';
+    app.innerHTML=h;
+  }
+  function newTestMatch(fmt){
+    var c=cur();
+    if(c && !confirm("Er staat nog een wedstrijd open ("+c.label+"). Die wordt weggegooid als je de testmodus start en komt niet bij oude wedstrijden. Toch de testmodus starten?")) return;
+    var naam = fmt==="6" ? "6 tegen 6" : "5 tegen 5";
+    state.current = {
+      id:"m_"+Date.now(), label:"Test "+naam, opponent:"", thuis:true, test:true, format:fmt,
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
+        present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
+    };
+    save(true); undoStack=[]; go("opstelling");
+  }
+
   // ---------- nieuwe wedstrijd ----------
   function renderNieuw(){
     var h='<div class="screen"><div class="topbar"><h2>Nieuwe wedstrijd</h2>'+
@@ -829,7 +874,7 @@
     }
 
     var dots="";
-    POSITIONS.forEach(function(pos){
+    positions().forEach(function(pos){
       var p=placed[pos.id];
       if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+actOutline(p)+'" data-drop="pos:'+pos.id+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
       else { dots+='<div class="dot" style="left:'+pos.x+'%;top:'+pos.y+'%" data-drop="pos:'+pos.id+'"></div>'; }
@@ -953,7 +998,7 @@
     renderOpstelling();
   }
   function nearestPos(x,y,r){var best=null,bd=Infinity;
-    POSITIONS.forEach(function(p){var cx=r.left+r.width*p.x/100,cy=r.top+r.height*p.y/100,dx=x-cx,dy=y-cy,dd=dx*dx+dy*dy;
+    positions().forEach(function(p){var cx=r.left+r.width*p.x/100,cy=r.top+r.height*p.y/100,dx=x-cx,dy=y-cy,dd=dx*dx+dy*dy;
       if(dd<bd){bd=dd;best=p.id;}});return best;}
   function resolveDrop(x,y){
     var el=document.elementFromPoint(x,y), t=el?el.closest("[data-drop]"):null;
@@ -1123,6 +1168,9 @@
     var a=actEl.getAttribute("data-action"), id=actEl.getAttribute("data-id");
     switch(a){
       case "new-match": newMatch(); break;
+      case "open-test": go("test"); break;
+      case "test-5": newTestMatch("5"); break;
+      case "test-6": newTestMatch("6"); break;
       case "thuis": newThuis=true; renderNieuw(); break;
       case "uit": newThuis=false; renderNieuw(); break;
       case "nieuw-go": createMatch(); break;
