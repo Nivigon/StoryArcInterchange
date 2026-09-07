@@ -1571,7 +1571,9 @@
   ensureSync();
   ensurePresets();
   applyRoleDefaults();
-  if(cur())cur().lastTick=Date.now();
+  // Bij opstarten de klok niet resetten: als Android de app op de achtergrond
+  // heeft afgesloten, telt de tick de tussentijd bij (tot de kwartgrens).
+  if(cur() && !cur().lastTick)cur().lastTick=Date.now();
   renderView();
   setInterval(tick,500);
   window.addEventListener("online",function(){ syncNow(false); pullPresets(); });
