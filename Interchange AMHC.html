@@ -291,6 +291,15 @@
   var STINT_FULL = 8 * 60;
   var KEY = "wisselapp_v3";
 
+  // Vaste Firebase-koppeling: de app synchroniseert standaard naar deze
+  // Firestore-collection, zonder dat er per apparaat iets ingesteld hoeft te
+  // worden. Het synchronisatie-scherm blijft werken om dit desgewenst aan te
+  // passen. Let op: een Firebase Web API key is bedoeld om in de client te
+  // staan en is geen geheim; de beveiliging zit in de Firestore-regels.
+  var FB_PROJECT = "storyarcinterchange";
+  var FB_KEY = "AIzaSyAm3pUP2_6p4HmEEqhTK9VaEsJqUuRPVP8";
+  var FB_COLL = "wedstrijden";
+
   var state = load() || fresh();
   if(!state.roster) state = migrateOrFresh(state);
   state.view = state.current ? "home" : "home"; // altijd op home starten
@@ -303,7 +312,7 @@
     return { v:VERSION, view:"home",
       roster: seed.map(function(s,i){return {id:"r"+i,name:s[0],line:s[1]};}),
       current:null, history:[], detailId:null, defaults:null,
-      sync:{mode:"off",url:"",key:"",table:"wedstrijden",token:"",project:""}, outbox:[] };
+      sync:{mode:"firebase",url:"",key:FB_KEY,table:FB_COLL,token:"",project:FB_PROJECT}, outbox:[] };
   }
   function migrateOrFresh(old){ return fresh(); }
 
@@ -1220,7 +1229,19 @@
   }
 
   // ---------- database sync ----------
-  function ensureSync(){ if(!state.sync)state.sync={mode:"off",url:"",key:"",table:"wedstrijden",token:""}; if(!state.outbox)state.outbox=[]; }
+  function ensureSync(){
+    if(!state.sync)state.sync={mode:"firebase",url:"",key:FB_KEY,table:FB_COLL,token:"",project:FB_PROJECT};
+    if(!state.outbox)state.outbox=[];
+    var s=state.sync;
+    // Vul een nog niet ingestelde koppeling automatisch met de vaste Firebase-
+    // gegevens. Wie ooit bewust een andere verbinding koos (project of key al
+    // ingevuld), laten we met rust.
+    var nogNietIngesteld = !s.project && !s.key;
+    if(!s.project)s.project=FB_PROJECT;
+    if(!s.key)s.key=FB_KEY;
+    if(!s.table)s.table=FB_COLL;
+    if((!s.mode||s.mode==="off") && nogNietIngesteld)s.mode="firebase";
+  }
   function matchInHistory(id){for(var i=0;i<state.history.length;i++)if(state.history[i].id===id)return state.history[i];return null;}
   function queueMatch(id){ if(state.outbox.indexOf(id)<0)state.outbox.push(id); }
   function removeOutbox(id){ state.outbox=state.outbox.filter(function(x){return x!==id;}); }
