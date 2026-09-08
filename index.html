@@ -270,6 +270,40 @@
   .chip.mfield.longest{transform:translate(-50%,-50%) scale(1.08);outline:3px solid var(--lime);outline-offset:1px;box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:5}
   .opsfoot{flex-shrink:0;padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);background:var(--panel);border-top:1px solid var(--line);display:flex;gap:8px}
   .opsfoot .btn{flex:1}
+  /* twee veldjes naast elkaar (testmodus) */
+  .board.wide{overflow-y:auto}
+  .board.wide .board-top{flex:0 0 auto}
+  .board-top.two{gap:10px}
+  .board-top.two .teamcol{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:6px;min-height:0}
+  /* Twee velden naast elkaar zijn smaller, dus de veldjes krijgen een vaste
+     hoogte en de naamkaartjes worden wat kleiner zodat ze niet overlappen. */
+  .board-top.two .pitchwrap{flex:0 0 auto;height:clamp(240px,46vh,470px)}
+  .board-top.two .pitch{height:100%;width:auto}
+  .board-top.two .chip.on{font-size:.84rem;padding:5px 7px;min-width:44px}
+  .board-top.two .chip.mfield{padding:5px 7px;min-width:50px}
+  .board-top.two .chip.mfield .mn{font-size:.94rem}
+  .board-top.two .chip.mfield .mt{font-size:.86rem}
+  .board-top.two .chip.mfield .mt2{font-size:.7rem}
+  .board-top.two .dot{width:32px;height:32px}
+  .board-top.two .rbadge{width:13px;height:13px;font-size:.56rem}
+  .board-top.two .gdot{width:8px;height:8px}
+  .tc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:800;font-size:.85rem;color:var(--muted);letter-spacing:.04em;padding:0 2px}
+  .tc-h .tc-n{font-size:1rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tc-h .tc-c{font-weight:700;white-space:nowrap}
+  .tc-h .scorebar{margin-top:0}
+  .tc-h .scbtn{width:26px;height:26px;font-size:1rem}
+  .tc-h .scoreval{background:var(--accent);color:#fff;padding:3px 8px;font-size:.95rem}
+  .tc-h .scdash{color:var(--muted)}
+  .tc-bench{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;padding:6px;
+    border:1px dashed var(--line);border-radius:12px;background:var(--panel);min-height:56px}
+  .tc-bench .tb-empty{color:var(--muted)}
+  .sidewide{flex:0 0 auto;padding:0 10px 10px}
+  @media (max-width:700px){
+    .board-top.two{flex-direction:column}
+    .board-top.two .teamcol{flex:0 0 auto}
+    .board-top.two .pitchwrap{height:auto;align-items:flex-start}
+    .board-top.two .pitch{width:74%;max-width:300px;height:auto;aspect-ratio:62/100}
+  }
   @media (max-width:640px){
     .chips{min-height:90px}
   }
@@ -308,6 +342,10 @@
     {id:"VDL",x:20,y:72},{id:"VDC",x:50,y:72},{id:"VDR",x:80,y:72},
     {id:"K",x:50,y:95}
   ];
+  // Testmodus met twee veldjes: de selectie speelt op twee kleine velden
+  // tegelijk. Elke speler hoort bij een veld (A of B), staat daar in het veld
+  // of op de eigen bank, en de klok en de kwarten gelden voor allebei.
+  var TEST_PITCHES = [{id:"A",name:"Veld A"},{id:"B",name:"Veld B"}];
   var STINT_FULL = 8 * 60;
   // Veiligheidsnet: zoveel minuten na de eerste keer Start wordt een
   // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
@@ -380,9 +418,13 @@
         if(r[pid].longest)map[pid].longest=true;
       });
     }
-    groups.forEach(function(g){ var list=fld.filter(function(p){return g.members.indexOf(p.id)>=0;});
-      list.forEach(function(p){covered[p.id]=true;}); apply(list); });
-    var byPos={}; fld.forEach(function(p){ if(covered[p.id])return; var gg=POSGRP[p.pos]||"x"; (byPos[gg]=byPos[gg]||[]).push(p);});
+    // Vergelijken doen we binnen een veldje: wie op veld A het langst staat
+    // heeft niets te maken met de speeltijd op veld B.
+    groups.forEach(function(g){ pitches().forEach(function(t){
+      var list=fld.filter(function(p){return g.members.indexOf(p.id)>=0 && teamOf(p)===t.id;});
+      if(!list.length)return;
+      list.forEach(function(p){covered[p.id]=true;}); apply(list); }); });
+    var byPos={}; fld.forEach(function(p){ if(covered[p.id])return; var gg=teamOf(p)+"|"+(POSGRP[p.pos]||"x"); (byPos[gg]=byPos[gg]||[]).push(p);});
     Object.keys(byPos).forEach(function(gg){ apply(byPos[gg]); });
     return map;
   }
@@ -390,11 +432,33 @@
   var cur=function(){return state.current;};
   // Welke veldplekken gelden voor de huidige wedstrijd. Testwedstrijden
   // gebruiken een klein veld; alle andere wedstrijden de vaste 11-opstelling.
+  // Beide veldjes van een testwedstrijd spelen dezelfde opstelling.
   function positions(){ var c=cur(), f=c&&c.format; if(f==="5")return FORMATION_5; if(f==="6")return FORMATION_6; return POSITIONS; }
+  // De velden van deze wedstrijd. Een gewone wedstrijd heeft er een, met een
+  // lege id, zodat spelers zonder team gewoon meetellen.
+  function pitches(){ var c=cur(); return (c && c.pitches && c.pitches.length) ? c.pitches : [{id:"",name:""}]; }
+  function twoPitch(){ var c=cur(); return !!(c && c.pitches && c.pitches.length>1); }
+  function teamOf(p){ return p.team||""; }
+  function pitchById(id){ var ps=pitches(); for(var i=0;i<ps.length;i++)if(ps[i].id===(id||""))return ps[i]; return null; }
+  function pitchName(id){ var p=pitchById(id); return p?p.name:""; }
+  // Zorg dat iedere speler bij een bestaand veld hoort. Nieuwe invallers of
+  // gegevens van een oudere versie belanden zo altijd op een van de banken.
+  function normalizeTeams(){
+    var c=cur(); if(!c||!twoPitch())return;
+    var ids=c.pitches.map(function(t){return t.id;});
+    var count={}; ids.forEach(function(i){count[i]=0;});
+    c.players.forEach(function(p){ if(ids.indexOf(teamOf(p))>=0)count[teamOf(p)]++; });
+    c.players.forEach(function(p){ if(ids.indexOf(teamOf(p))<0){
+      var small=ids[0]; ids.forEach(function(i){ if(count[i]<count[small])small=i; });
+      p.team=small; p.pos=null; count[small]++; } });
+  }
   function mById(id){var c=cur();if(!c)return null;for(var i=0;i<c.players.length;i++)if(c.players[i].id===id)return c.players[i];return null;}
-  function present(){var c=cur();return c?c.players.filter(function(p){return p.present;}):[];}
-  function field(){return present().filter(function(p){return !!p.pos;});}
-  function bench(){return present().filter(function(p){return !p.pos;});}
+  // Zonder team-argument gaat het over de hele selectie, met team alleen over
+  // dat ene veldje.
+  function present(t){var c=cur();if(!c)return [];
+    return c.players.filter(function(p){return p.present && (t==null||teamOf(p)===t);});}
+  function field(t){return present(t).filter(function(p){return !!p.pos;});}
+  function bench(t){return present(t).filter(function(p){return !p.pos;});}
 
   // ---------- navigation ----------
   function go(v){state.view=v;save(true);renderView();}
@@ -405,14 +469,21 @@
   var cornerOpen=false, corner=null;
   var cardOpen=false;
   var scoreOpen=false;
-  function addGoal(team){ var c=cur(); if(!c)return; if(!c.goals)c.goals=[];
-    c.goals.push({id:"g"+Date.now(),team:team,q:c.quarter,t:Math.round(c.elapsed),on:field().map(function(p){return p.name;}),off:bench().map(function(p){return p.name;})});
-    save(true); renderMatch(); toast(team==="voor"?"Doelpunt voor":"Tegendoelpunt"); }
+  // Doelpunten horen bij een veldje. Bij een gewone wedstrijd is dat het lege
+  // veld, zodat oude wedstrijden precies zo blijven werken als eerst.
+  function goalsFor(pid){ var c=cur(); return ((c&&c.goals)||[]).filter(function(x){return (x.pitch||"")===(pid||"");}); }
+  function scoreFor(pid,team){ return goalsFor(pid).filter(function(x){return x.team===team;}).length; }
+  function goalLabel(pid){ return twoPitch()?(pitchName(pid)+": "):""; }
+  function addGoal(team,pid){ pid=pid||""; var c=cur(); if(!c)return; if(!c.goals)c.goals=[];
+    var t=twoPitch()?pid:null;
+    c.goals.push({id:"g"+Date.now(),team:team,pitch:pid,q:c.quarter,t:Math.round(c.elapsed),on:field(t).map(function(p){return p.name;}),off:bench(t).map(function(p){return p.name;})});
+    save(true); renderMatch(); toast(goalLabel(pid)+(team==="voor"?"Doelpunt voor":"Tegendoelpunt")); }
   function delGoal(gid){ var c=cur(); c.goals=(c.goals||[]).filter(function(x){return x.id!==gid;}); save(true); renderMatch(); }
-  function removeGoal(team){ var c=cur(); if(!c||!c.goals||!c.goals.length){ toast(team==="voor"?"Geen doelpunt voor":"Geen tegendoelpunt"); return; }
-    var idx=-1; for(var i=0;i<c.goals.length;i++)if(c.goals[i].team===team)idx=i; // laatste van deze kant
-    if(idx<0){ toast(team==="voor"?"Geen doelpunt voor om weg te halen":"Geen tegendoelpunt om weg te halen"); return; }
-    c.goals.splice(idx,1); save(true); renderMatch(); toast(team==="voor"?"Doelpunt voor weggehaald":"Tegendoelpunt weggehaald"); }
+  function removeGoal(team,pid){ pid=pid||""; var c=cur(); var g=goalsFor(pid);
+    var idx=-1; for(var i=0;i<g.length;i++)if(g[i].team===team)idx=i; // laatste van deze kant
+    if(idx<0){ toast(goalLabel(pid)+(team==="voor"?"Geen doelpunt voor om weg te halen":"Geen tegendoelpunt om weg te halen")); return; }
+    var gid=g[idx].id; c.goals=c.goals.filter(function(x){return x.id!==gid;});
+    save(true); renderMatch(); toast(goalLabel(pid)+(team==="voor"?"Doelpunt voor weggehaald":"Tegendoelpunt weggehaald")); }
   function scorePanel(){ if(!scoreOpen)return ""; var c=cur(); var g=(c.goals||[]).slice().sort(function(a,b){return a.t-b.t;});
     var voor=g.filter(function(x){return x.team==="voor";}).length, tegen=g.filter(function(x){return x.team==="tegen";}).length;
     var per={}; g.forEach(function(x){
@@ -420,9 +491,12 @@
       (x.off||[]).forEach(function(n){per[n]=per[n]||{v:0,t:0,vo:0,to:0}; if(x.team==="voor")per[n].vo++; else per[n].to++;});
     });
     var names=Object.keys(per).sort(function(a,b){return (per[b].v-per[b].t)-(per[a].v-per[a].t);});
-    var glist=g.length? g.map(function(x){return '<div class="rl"><span style="flex:1">Kwart '+x.q+' &middot; '+fmt(x.t)+' &middot; '+(x.team==="voor"?"voor":"tegen")+'</span><button class="btn row-x" data-action="goal-del" data-id="'+x.id+'">&times;</button></div>';}).join("") : '<div class="rl empty2">Nog geen doelpunten</div>';
+    var glist=g.length? g.map(function(x){return '<div class="rl"><span style="flex:1">'+(twoPitch()?esc(pitchName(x.pitch))+' &middot; ':'')+'Kwart '+x.q+' &middot; '+fmt(x.t)+' &middot; '+(x.team==="voor"?"voor":"tegen")+'</span><button class="btn row-x" data-action="goal-del" data-id="'+x.id+'">&times;</button></div>';}).join("") : '<div class="rl empty2">Nog geen doelpunten</div>';
     var plist=names.map(function(n){return '<div class="rl"><span style="flex:1">'+esc(n)+'</span><span style="font-weight:800;font-variant-numeric:tabular-nums;font-size:.85rem">in +'+per[n].v+'/-'+per[n].t+' &middot; uit +'+per[n].vo+'/-'+per[n].to+'</span></div>';}).join("");
-    return '<div class="scorepanel"><div class="rl-h">STAND '+voor+' - '+tegen+' <button class="mini" data-action="score-close">sluiten</button></div>'+glist+
+    var kop = twoPitch()
+      ? pitches().map(function(t){return esc(t.name)+' '+scoreFor(t.id,"voor")+' - '+scoreFor(t.id,"tegen");}).join(' &middot; ')
+      : 'STAND '+voor+' - '+tegen;
+    return '<div class="scorepanel"><div class="rl-h">'+kop+' <button class="mini" data-action="score-close">sluiten</button></div>'+glist+
       (plist?'<div class="rl-h" style="margin-top:10px">PER SPELER (in veld / op bank)</div>'+plist:'')+'</div>'; }
   function cardColor(t){return t==="groen"?"#2e9e4f":t==="geel"?"#f2c200":"#d62828";}
   var CORNERS=["afschuif","ook afschuif","nog meer afschuif","mega veel afschuif"];
@@ -644,8 +718,8 @@
     app.innerHTML=h;
   }
 
-  function benchStripInner(){
-    var c=cur(); var b=bench(); b.sort(function(a,b2){return a.total-b2.total;});
+  function benchStripInner(t){
+    var c=cur(); var b=bench(t); b.sort(function(a,b2){return a.total-b2.total;});
     if(!b.length)return {n:0,html:'<span class="tb-empty">Geen wissels</span>'};
     var html=b.map(function(p){var cls="chip mbench"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-in";
       return '<div class="'+cls+'" style="'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+'<span class="mn">'+esc(p.name)+'</span><span class="mt">bank '+fmt(p.benchStint||0)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';}).join("");
@@ -683,26 +757,32 @@
     toast(p.name+" "+p.card.type+(p.card.type!=="rood"?" "+fmt(p.card.secsLeft):"")+", plek is vrij");
   }
 
+  function scoreBarHTML(pid){
+    pid=pid||"";
+    return '<div class="scorebar">'+
+      '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="voor" data-veld="'+pid+'" title="Doelpunt voor eraf">&minus;</button>'+
+        '<span class="scoreval" data-action="score-open" title="Details">'+scoreFor(pid,"voor")+'</span>'+
+        '<button class="scbtn plus" data-action="goal-voor" data-veld="'+pid+'" title="Doelpunt voor">+</button></span>'+
+      '<span class="scdash">&ndash;</span>'+
+      '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="tegen" data-veld="'+pid+'" title="Tegendoelpunt eraf">&minus;</button>'+
+        '<span class="scoreval" data-action="score-open" title="Details">'+scoreFor(pid,"tegen")+'</span>'+
+        '<button class="scbtn plus" data-action="goal-tegen" data-veld="'+pid+'" title="Tegendoelpunt">+</button></span></div>';
+  }
   function renderMatch(){
     var c=cur();
     if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qCap=c.qCap||1170;c.qBeeped=false;}
-    var bs=benchStripInner();
-    var gV=(c.goals||[]).filter(function(x){return x.team==="voor";}).length;
-    var gT=(c.goals||[]).filter(function(x){return x.team==="tegen";}).length;
+    normalizeTeams();
+    // Met twee veldjes staat de wisselbank en de stand bij het eigen veld, dus
+    // dan blijft de kop leeg op de klok, de kwarten en wie er uit staat na.
+    var two=twoPitch();
+    var bs=two?null:benchStripInner();
     var h='<div class="screen">';
     h+='<header>'+
        '<div class="hleft"><div id="clock" class="clock">'+fmt(c.qElapsed||0)+'</div>'+
          '<div class="hmeta"><span class="qpill" data-action="next-quarter">Kwart <span id="qnum">'+c.quarter+'</span> &#9654;</span> <span id="fieldCount"></span> &middot; <span id="stateLbl"></span></div>'+
-         '<div class="scorebar">'+
-           '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="voor" title="Doelpunt voor eraf">&minus;</button>'+
-             '<span class="scoreval" data-action="score-open" title="Details">'+gV+'</span>'+
-             '<button class="scbtn plus" data-action="goal-voor" title="Doelpunt voor">+</button></span>'+
-           '<span class="scdash">&ndash;</span>'+
-           '<span class="scgrp"><button class="scbtn del" data-action="goal-undo" data-id="tegen" title="Tegendoelpunt eraf">&minus;</button>'+
-             '<span class="scoreval" data-action="score-open" title="Details">'+gT+'</span>'+
-             '<button class="scbtn plus" data-action="goal-tegen" title="Tegendoelpunt">+</button></span></div>'+
+         (two?'':scoreBarHTML(""))+
        '</div>'+
-       '<div class="hbench"><div class="tb-h">WISSELS ('+bs.n+')</div><div class="tb-strip" id="benchStrip">'+bs.html+'</div></div>'+
+       (two?'<div style="flex:1 1 auto"></div>':'<div class="hbench"><div class="tb-h">WISSELS ('+bs.n+')</div><div class="tb-strip" id="benchStrip">'+bs.html+'</div></div>')+
        '<div class="huit" data-uit><div class="tb-h">UIT</div><div class="tb-strip">'+uitStripInner()+'</div></div>'+
        '<div class="hright">'+
          '<div id="warnpill" class="warnpill" data-action="warn-mute" style="display:none"></div>'+
@@ -723,29 +803,48 @@
   function renderFieldBody(){
     var main=document.getElementById("matchMain"); if(!main)return;
     var c=cur();
-    var placed={}; c.players.forEach(function(p){if(p.pos)placed[p.pos]=p;});
-    var dots="";
-    positions().forEach(function(pos){
-      var p=placed[pos.id];
-      if(p){
-        var cls="chip on mfield"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-out";
-        dots+='<div class="'+cls+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
-          '<span class="mn">'+esc(p.name)+'</span><span class="mt">'+fmt(p.stint)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';
-      } else {
-        dots+='<div class="dot open" style="left:'+pos.x+'%;top:'+pos.y+'%" data-emptypos="'+pos.id+'"></div>';
-      }
-    });
-    var b=bench();
+    // De plekken van een veldje, met de speler die er staat of een open plek.
+    function pitchHTML(tm,withBanner){
+      var placed={}; c.players.forEach(function(p){if(p.pos && teamOf(p)===tm)placed[p.pos]=p;});
+      var dots="";
+      positions().forEach(function(pos){
+        var p=placed[pos.id];
+        if(p){
+          var cls="chip on mfield"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-out";
+          dots+='<div class="'+cls+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
+            '<span class="mn">'+esc(p.name)+'</span><span class="mt">'+fmt(p.stint)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';
+        } else {
+          dots+='<div class="dot open" style="left:'+pos.x+'%;top:'+pos.y+'%" data-emptypos="'+pos.id+'" data-team="'+tm+'"></div>';
+        }
+      });
+      return '<div class="pitch" data-pitch="'+tm+'">'+pitchSVG()+dots+(withBanner?cornerBanner():'')+'</div>';
+    }
     var hasTalk=cur().talk && cur().talk.length;
     var showTalk=hasTalk && ((c.elapsed<1 && !c.running) || coachMode);
     var sideHtml = matchGrp
       ? groupEditorHTML()
       : (showTalk?voorbesprekingHTML():legendHTML())+'<div class="rulesbox"><div class="rl-h">REGELS <button class="mini" data-action="rule-prompt">+ regel</button></div>'+ruleRows(false)+'</div>';
 
-    main.innerHTML='<div class="board'+(matchGrp?' editing':'')+'"><div class="board-top">'+
-      '<div class="pitchwrap"><div class="pitch" id="pitch">'+pitchSVG()+dots+cornerBanner()+'</div></div>'+
-      '<div class="side">'+sideHtml+'</div>'+
-      '</div></div>'+cornerPanel()+cardPanel()+scorePanel();
+    var body;
+    if(twoPitch()){
+      body='<div class="board wide'+(matchGrp?' editing':'')+'"><div class="board-top two">'+
+        pitches().map(function(t,i){
+          var bsl=benchStripInner(t.id);
+          return '<div class="teamcol">'+
+            '<div class="tc-h"><span class="tc-n">'+esc(t.name)+'</span><span class="tc-c" data-fc="'+t.id+'"></span>'+scoreBarHTML(t.id)+'</div>'+
+            '<div class="pitchwrap">'+pitchHTML(t.id,i===0)+'</div>'+
+            '<div class="poolhead">WISSELS ('+bsl.n+')</div>'+
+            '<div class="tc-bench" data-bench="'+t.id+'">'+bsl.html+'</div>'+
+          '</div>';
+        }).join("")+
+        '</div><div class="sidewide">'+sideHtml+'</div></div>';
+    } else {
+      body='<div class="board'+(matchGrp?' editing':'')+'"><div class="board-top">'+
+        '<div class="pitchwrap">'+pitchHTML("",true)+'</div>'+
+        '<div class="side">'+sideHtml+'</div>'+
+        '</div></div>';
+    }
+    main.innerHTML=body+cornerPanel()+cardPanel()+scorePanel();
     if(!matchGrp) attachMatchDrag();
     refreshDynamic();
   }
@@ -767,12 +866,18 @@
     if(clk){clk.textContent=fmt(c.qElapsed||0);clk.classList.toggle("paused",!c.running&&(c.qElapsed||0)>0);clk.classList.toggle("over",(c.qElapsed||0)>=(c.qTarget||1050));}
     var qn=document.getElementById("qnum"); if(qn)qn.textContent=c.quarter;
     var fc=document.getElementById("fieldCount"); if(fc)fc.textContent=field().length+" in het veld";
+    var fcs=document.querySelectorAll("[data-fc]");
+    for(var fi=0;fi<fcs.length;fi++)fcs[fi].textContent=field(fcs[fi].getAttribute("data-fc")).length+" in het veld";
     var sl=document.getElementById("stateLbl"); if(sl)sl.textContent=c.running?"Loopt":(c.elapsed>0?"Gepauzeerd":"Klaar om te starten");
     var sb=document.getElementById("startBtn");
     if(sb){sb.textContent=c.running?"Pauze":(c.elapsed>0?"Hervat":"Start");sb.classList.toggle("play",!c.running);}
-    var fl=field(), w=[];
-    if(!fl.some(function(p){return p.aangever;}))w.push("Geen aangever");
-    if(!fl.some(function(p){return p.stopper;}))w.push("Geen stopper");
+    // Aangever en stopper worden per veldje bekeken: elk team heeft ze nodig.
+    var w=[];
+    pitches().forEach(function(t){
+      var fl=field(t.id), pre=twoPitch()?(t.name+": g"):"G";
+      if(!fl.some(function(p){return p.aangever;}))w.push(pre+"een aangever");
+      if(!fl.some(function(p){return p.stopper;}))w.push(pre+"een stopper");
+    });
     var missing=w.length>0;
     if(!missing)warnMuted=false;
     var wp=document.getElementById("warnpill");
@@ -799,24 +904,38 @@
   function renderTest(){
     var h='<div class="screen"><div class="topbar"><h2>Test modus</h2>'+
       '<button class="hbtn" data-action="home">Terug</button></div><div class="body">';
-    h+='<div class="sec"><p class="sub">Een oefenpartijtje op een klein veld zodat de meisjes kunnen wennen. De klok, kwarten, wissels en speeltijd werken precies zoals bij een gewone wedstrijd.</p></div>';
+    h+='<div class="sec"><p class="sub">Een oefenpartijtje op kleine veldjes zodat de meisjes kunnen wennen. Met twee velden speelt de hele selectie tegelijk: twee teams, elk met een eigen veld, een eigen bank en een eigen stand. De klok, de kwarten, de wissels en de speeltijd werken precies zoals bij een gewone wedstrijd.</p></div>';
     h+='<div style="display:flex;flex-direction:column;gap:12px">';
-    h+='<button class="bigbtn play" data-action="test-5"><span>5 tegen 5<br><small>keeper, 2 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
-    h+='<button class="bigbtn play" data-action="test-6"><span>6 tegen 6<br><small>keeper, 3 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
+    h+='<button class="bigbtn play" data-action="test-5-2"><span>5 tegen 5, twee velden<br><small>2 teams &middot; per veld keeper, 2 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
+    h+='<button class="bigbtn play" data-action="test-6-2"><span>6 tegen 6, twee velden<br><small>2 teams &middot; per veld keeper, 3 achter, 1 midden, 2 voor</small></span><span>+</span></button>';
+    h+='<button class="bigbtn ghost" data-action="test-5"><span>5 tegen 5<br><small>een veld</small></span><span>+</span></button>';
+    h+='<button class="bigbtn ghost" data-action="test-6"><span>6 tegen 6<br><small>een veld</small></span><span>+</span></button>';
     h+='</div></div></div>';
     app.innerHTML=h;
   }
-  function newTestMatch(fmt){
+  // Verdeel de selectie om en om over de veldjes, lijn voor lijn, zodat beide
+  // teams ongeveer even groot zijn en de linies verdeeld worden. De coach kan
+  // daarna nog slepen in het opstellingsscherm.
+  function splitTeams(players,ids){
+    var order={}; LINES.forEach(function(l,i){order[l]=i;});
+    var list=players.slice().sort(function(a,b){
+      var oa=(order[a.line]==null?99:order[a.line]), ob=(order[b.line]==null?99:order[b.line]);
+      return oa-ob || a.name.localeCompare(b.name); });
+    list.forEach(function(p,i){ p.team=ids[i%ids.length]; });
+  }
+  function newTestMatch(fmt,two){
     var c=cur();
     if(c && !confirm("Er staat nog een wedstrijd open ("+c.label+"). Die wordt weggegooid als je de testmodus start en komt niet bij oude wedstrijden. Toch de testmodus starten?")) return;
     var naam = fmt==="6" ? "6 tegen 6" : "5 tegen 5";
-    state.current = {
-      id:"m_"+Date.now(), label:"Test "+naam, opponent:"", thuis:true, test:true, format:fmt,
+    var m = {
+      id:"m_"+Date.now(), label:"Test "+naam+(two?" (2 velden)":""), opponent:"", thuis:true, test:true, format:fmt,
+      pitches: two ? TEST_PITCHES.map(function(t){return {id:t.id,name:t.name};}) : null,
       date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
-    save(true); undoStack=[]; go("opstelling");
+    if(two) splitTeams(m.players,m.pitches.map(function(t){return t.id;}));
+    state.current=m; save(true); undoStack=[]; go("opstelling");
   }
 
   // ---------- nieuwe wedstrijd ----------
@@ -859,28 +978,43 @@
     h+='</div>';
     return h;
   }
+  // Sleepdoelen dragen het veldje mee, zodat dezelfde plek op veld A en veld B
+  // uit elkaar gehouden wordt. Bij een gewone wedstrijd blijft het "pos:VL".
+  function posTarget(tm,pid){ return "pos:"+(tm?tm+":":"")+pid; }
+  function benchTarget(tm){ return tm?("bench:"+tm):"bench"; }
+  function parsePosTarget(t){ var s=t.slice(4), i=s.indexOf(":");
+    return i>=0 ? {team:s.slice(0,i),pos:s.slice(i+1)} : {team:"",pos:s}; }
   function reRenderGroups(){ if(state.view==="match") renderMatch(); else renderOpstelling(); }
   function findGroupOutline(p){ if(activeGroup){ var g=findGroup(activeGroup); if(g && g.members.indexOf(p.id)>=0) return 'outline:3px solid '+g.color+';outline-offset:1px;'; } return ''; }
   function renderOpstelling(){
     var c=cur(); if(!c){go("home");return;}
     if(!c.groups)c.groups=[];
-    var placed={}; c.players.forEach(function(p){ if(p.pos)placed[p.pos]=p; });
-    var wissels=c.players.filter(function(p){return p.present && !p.pos;});
+    normalizeTeams();
     var uit=c.players.filter(function(p){return !p.present;});
     function actOutline(p){
       if(grpMode && activeGroup){ var g=findGroup(activeGroup); if(g && g.members.indexOf(p.id)>=0) return 'outline:3px solid '+g.color+';outline-offset:1px;'; }
       if(rolMode && activeRole && p[activeRole]) return 'outline:3px solid '+ROLE_COLORS[activeRole]+';outline-offset:1px;';
       return '';
     }
-
-    var dots="";
-    positions().forEach(function(pos){
-      var p=placed[pos.id];
-      if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+actOutline(p)+'" data-drop="pos:'+pos.id+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
-      else { dots+='<div class="dot" style="left:'+pos.x+'%;top:'+pos.y+'%" data-drop="pos:'+pos.id+'"></div>'; }
-    });
-    var poolChips = wissels.map(function(p){return '<div class="chip'+(p.guest?" guest":"")+'" style="'+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>';}).join("");
-    var uitChips = uit.map(function(p){return '<div class="chip'+(p.guest?" guest":"")+'" style="'+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>';}).join("");
+    function chipHTML(p){ return '<div class="chip'+(p.guest?" guest":"")+'" style="'+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+    // Een veldje met zijn eigen plekken. Bij een gewone wedstrijd is dat er maar een.
+    function pitchHTML(tm){
+      var placed={}; c.players.forEach(function(p){ if(p.pos && teamOf(p)===tm)placed[p.pos]=p; });
+      var dots="";
+      positions().forEach(function(pos){
+        var p=placed[pos.id], tgt=posTarget(tm,pos.id);
+        if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+actOutline(p)+'" data-drop="'+tgt+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+        else { dots+='<div class="dot" style="left:'+pos.x+'%;top:'+pos.y+'%" data-drop="'+tgt+'"></div>'; }
+      });
+      return '<div class="pitch" data-pitch="'+tm+'">'+pitchSVG()+dots+'</div>';
+    }
+    function poolHTML(t){
+      var w=c.players.filter(function(p){return p.present && !p.pos && teamOf(p)===t.id;});
+      return '<div class="poolhead">WISSELS'+(twoPitch()?' '+esc(t.name).toUpperCase():'')+' ('+w.length+')</div>'+
+        '<div class="chips" data-drop="'+benchTarget(t.id)+'">'+(w.map(chipHTML).join("")||'<span class="empty" style="pointer-events:none">Sleep spelers hierheen</span>')+'</div>';
+    }
+    var uitChips = uit.map(chipHTML).join("");
+    var uitZone = '<div class="outzone" data-drop="out"><div class="oz-h">SPEELT NIET</div><div class="chips" data-drop="out">'+uitChips+'</div></div>';
 
     var h='<div class="screen"><div class="topbar"><h2>Opstelling</h2>'+
       '<button class="hbtn" data-action="add-invaller">+ invaller</button>'+
@@ -888,29 +1022,44 @@
     h+='<div class="segbar"><button class="pill '+(!grpMode&&!rolMode?"on":"")+'" data-action="mode-veld">Opstelling</button>'+
        '<button class="pill '+(grpMode?"on":"")+'" data-action="mode-groep">Groepjes</button>'+
        '<button class="pill '+(rolMode?"on":"")+'" data-action="mode-rol">Rollen</button></div>';
-    h+='<div class="board"><div class="board-top">';
-    h+='<div class="pitchwrap"><div class="pitch" id="pitch">'+pitchSVG()+dots+'</div></div>';
-    h+='<div class="side">';
-    if(grpMode){ h+=groupEditorHTML(); }
+    var modes="";
+    if(grpMode){ modes+=groupEditorHTML(); }
     if(rolMode){
-      h+='<div class="grped"><div class="seg">'+
+      modes+='<div class="grped"><div class="seg">'+
          '<button class="pill '+(activeRole==="aangever"?"on":"")+'" data-action="role-sel" data-id="aangever">Aangevers</button>'+
          '<button class="pill '+(activeRole==="stopper"?"on":"")+'" data-action="role-sel" data-id="stopper">Stoppers</button></div>'+
          '<p class="sub" style="margin-top:8px">'+(activeRole?('Tik spelers aan om ze als '+activeRole+' te zetten of weg te halen.'):'Kies Aangevers of Stoppers en tik dan de spelers aan.')+'</p></div>';
     }
-    h+='<div class="poolhead">WISSELS ('+wissels.length+')</div>'+
-       '<div class="chips" data-drop="bench">'+(poolChips||'<span class="empty" style="pointer-events:none">Sleep spelers hierheen</span>')+'</div>'+
-       '<div class="outzone" data-drop="out"><div class="oz-h">SPEELT NIET</div><div class="chips" data-drop="out">'+uitChips+'</div></div>'+
-       '<div class="rulesbox"><div class="rl-h">REGELS</div>'+ruleRows(true)+
+    var boxes='<div class="rulesbox"><div class="rl-h">REGELS</div>'+ruleRows(true)+
        '<div class="addrow" style="margin-top:8px"><input id="ruleInput" type="text" placeholder="Bijv. Lage spits: Luna of Maud"><button class="btn" data-action="rule-add" style="width:auto">Toevoegen</button></div></div>'+
        '<div class="rulesbox"><div class="rl-h">VOORBESPREKING</div>'+talkRows(true)+
-       '<div class="addrow" style="margin-top:8px"><input id="talkInput" type="text" placeholder="Bijv. Druk hoog, samen naar voren"><button class="btn" data-action="talk-add" style="width:auto">Toevoegen</button></div></div>'+
-       '<div class="rulesbox"><div class="rl-h">PRESETS</div>'+
+       '<div class="addrow" style="margin-top:8px"><input id="talkInput" type="text" placeholder="Bijv. Druk hoog, samen naar voren"><button class="btn" data-action="talk-add" style="width:auto">Toevoegen</button></div></div>';
+    // Presets zijn gemaakt voor de vaste 11-opstelling en passen niet op een
+    // klein veldje, dus die laten we in de testmodus weg.
+    if(!c.test) boxes+='<div class="rulesbox"><div class="rl-h">PRESETS</div>'+
        '<p class="sub">Sla deze opstelling, groepjes, regels en voorbespreking op onder een naam. Presets staan op al je tablets. Kies er een als vaste start voor nieuwe wedstrijden.</p>'+
        '<div class="addrow"><input id="presetName" type="text" placeholder="Naam, bijv. 3-3-3 of tegen kopploeg"><button class="btn" data-action="preset-save" style="width:auto">Opslaan</button></div>'+
        presetRows()+'</div>';
-    h+='</div>'; // side
-    h+='</div></div>'; // board-top, board
+
+    if(twoPitch()){
+      h+='<div class="board wide"><div class="board-top two">';
+      h+=pitches().map(function(t){
+        return '<div class="teamcol">'+
+          '<div class="tc-h"><span class="tc-n">'+esc(t.name)+'</span><span class="tc-c">'+field(t.id).length+' van de '+positions().length+' plekken bezet</span></div>'+
+          '<div class="pitchwrap">'+pitchHTML(t.id)+'</div>'+
+          poolHTML(t)+'</div>';
+      }).join("");
+      h+='</div>'; // board-top
+      h+='<div class="sidewide">'+modes+
+         '<p class="sub" style="margin:6px 2px 8px">Sleep een speler naar het andere veld om haar van team te wisselen.</p>'+
+         uitZone+boxes+'</div>';
+      h+='</div>'; // board
+    } else {
+      h+='<div class="board"><div class="board-top">';
+      h+='<div class="pitchwrap">'+pitchHTML("")+'</div>';
+      h+='<div class="side">'+modes+poolHTML(pitches()[0])+uitZone+boxes+'</div>';
+      h+='</div></div>'; // board-top, board
+    }
     h+='</div>'; // screen
     app.innerHTML=h;
     if(!grpMode && !rolMode) attachDrag();
@@ -1000,15 +1149,22 @@
   function nearestPos(x,y,r){var best=null,bd=Infinity;
     positions().forEach(function(p){var cx=r.left+r.width*p.x/100,cy=r.top+r.height*p.y/100,dx=x-cx,dy=y-cy,dd=dx*dx+dy*dy;
       if(dd<bd){bd=dd;best=p.id;}});return best;}
+  // Welk veldje ligt onder (of het dichtst bij) de vinger.
+  function pitchAt(x,y){
+    var els=document.querySelectorAll(".pitch[data-pitch]"), best=null, bd=Infinity;
+    for(var i=0;i<els.length;i++){ var r=els[i].getBoundingClientRect();
+      if(x>=r.left-24&&x<=r.right+24&&y>=r.top-24&&y<=r.bottom+24){
+        var cx=r.left+r.width/2, cy=r.top+r.height/2, d=(x-cx)*(x-cx)+(y-cy)*(y-cy);
+        if(d<bd){bd=d;best=els[i];} } }
+    return best;
+  }
   function resolveDrop(x,y){
     var el=document.elementFromPoint(x,y), t=el?el.closest("[data-drop]"):null;
-    if(t){var d=t.getAttribute("data-drop"); if(d==="bench"||d==="out")return {drop:d,hi:t};}
-    var pitch=document.getElementById("pitch");
+    if(t){var d=t.getAttribute("data-drop"); if(d==="out"||d.indexOf("bench")===0)return {drop:d,hi:t};}
+    var pitch=pitchAt(x,y);
     if(pitch){var r=pitch.getBoundingClientRect();
-      if(x>=r.left-24&&x<=r.right+24&&y>=r.top-24&&y<=r.bottom+24){
-        var pid=nearestPos(x,y,r), node=pitch.querySelector('[data-drop="pos:'+pid+'"]');
-        return {drop:"pos:"+pid,hi:node};
-      }
+      var pid=nearestPos(x,y,r), tgt=posTarget(pitch.getAttribute("data-pitch"),pid);
+      return {drop:tgt,hi:pitch.querySelector('[data-drop="'+tgt+'"]')};
     }
     if(t)return {drop:t.getAttribute("data-drop"),hi:t};
     return {drop:null,hi:null};
@@ -1016,12 +1172,14 @@
   function applyDrop(id,target){
     var p=mById(id); if(!p||!target)return;
     if(target==="out"){ p.pos=null; p.present=false; }
-    else if(target==="bench"){ p.pos=null; p.present=true; }
+    else if(target.indexOf("bench")===0){ p.pos=null; p.present=true;
+      if(target.indexOf(":")>=0)p.team=target.slice(target.indexOf(":")+1); }
     else if(target.indexOf("pos:")===0){
-      var posId=target.slice(4), from=p.pos, occ=null;
-      cur().players.forEach(function(pp){ if(pp.pos===posId && pp.id!==id)occ=pp; });
-      p.pos=posId; p.present=true;
-      if(occ){ occ.pos=(from!==null&&from!==undefined)?from:null; occ.present=true; occ.benchStint=0; }
+      var pt=parsePosTarget(target), posId=pt.pos, from=p.pos, fromTeam=teamOf(p), occ=null;
+      cur().players.forEach(function(pp){ if(pp.pos===posId && teamOf(pp)===pt.team && pp.id!==id)occ=pp; });
+      p.pos=posId; p.team=pt.team; p.present=true;
+      // Wie er stond ruilt van plek, of gaat naar de bank van het eigen veldje.
+      if(occ){ occ.pos=(from!==null&&from!==undefined)?from:null; if(occ.pos)occ.team=fromTeam; occ.present=true; occ.benchStint=0; }
     }
     if(p)p.benchStint=0;
     save(true);
@@ -1110,22 +1268,29 @@
     if(!m){go("history");return;}
     var h='<div class="screen"><div class="topbar"><h2>'+esc(m.label)+'</h2>'+
       '<button class="hbtn" data-action="open-history">Terug</button></div><div class="body">';
+    // Bij een testwedstrijd met twee veldjes hoort elke speler bij een veld.
+    var twoM=!!(m.pitches && m.pitches.length>1);
+    function pnameM(id){ var ps=m.pitches||[]; for(var pi=0;pi<ps.length;pi++)if(ps[pi].id===(id||""))return ps[pi].name; return ""; }
     h+='<div class="sec"><h3>Speeltijd</h3><p class="sub">'+datum(m.date)+' &middot; totale tijd '+fmt(m.elapsed)+(syncLabel(m)?' &middot; '+syncLabel(m):'')+(m.autoFinished?' &middot; automatisch afgerond':'')+'</p>';
     var order={};LINES.forEach(function(l,i){order[l]=i;});
     var pls=m.players.slice().sort(function(a,b){return b.total-a.total;});
     pls.forEach(function(p){
-      h+='<div class="stat"><span><span class="s-nm">'+esc(p.name)+'</span> <span class="s-ln">'+esc(p.line)+'</span></span>'+
+      h+='<div class="stat"><span><span class="s-nm">'+esc(p.name)+'</span> <span class="s-ln">'+esc(p.line)+(twoM?' &middot; '+esc(pnameM(p.team)):'')+'</span></span>'+
          '<span class="s-tm">'+fmt(p.total)+'</span></div>';
     });
     h+='</div>';
     if(m.goals && m.goals.length){
       var gv=m.goals.filter(function(x){return x.team==="voor";}).length, gt=m.goals.filter(function(x){return x.team==="tegen";}).length;
+      var kopM=twoM ? m.pitches.map(function(t){
+          var gg=m.goals.filter(function(x){return (x.pitch||"")===t.id;});
+          return esc(t.name)+' '+gg.filter(function(x){return x.team==="voor";}).length+' - '+gg.filter(function(x){return x.team==="tegen";}).length;
+        }).join(' &middot; ') : gv+' - '+gt;
       var per={}; m.goals.forEach(function(x){
         (x.on||[]).forEach(function(n){per[n]=per[n]||{v:0,t:0,vo:0,to:0}; if(x.team==="voor")per[n].v++; else per[n].t++;});
         (x.off||[]).forEach(function(n){per[n]=per[n]||{v:0,t:0,vo:0,to:0}; if(x.team==="voor")per[n].vo++; else per[n].to++;});
       });
       var nm=Object.keys(per).sort(function(a,b){return (per[b].v-per[b].t)-(per[a].v-per[a].t);});
-      h+='<div class="sec"><h3>Doelpunten '+gv+' - '+gt+'</h3><p class="sub">in veld en op bank toen er gescoord werd</p>';
+      h+='<div class="sec"><h3>Doelpunten '+kopM+'</h3><p class="sub">in veld en op bank toen er gescoord werd</p>';
       nm.forEach(function(n){ h+='<div class="stat"><span class="s-nm">'+esc(n)+'</span><span class="s-tm" style="font-size:.9rem">in +'+per[n].v+'/-'+per[n].t+' &middot; uit +'+per[n].vo+'/-'+per[n].to+'</span></div>'; });
       h+='</div>';
     }
@@ -1153,11 +1318,13 @@
       var pc=ev.target.closest("[data-player]");
       var ep=ev.target.closest("[data-emptypos]");
       var uz=ev.target.closest("[data-uit]");
+      var bz=ev.target.closest("[data-bench]");
       if(matchGrp){ if(pc){ toggleMember(pc.getAttribute("data-player")); return; } }
       else {
         if(uz && cur().selectedId){ tapUit(); return; }
         if(pc){ tapPlayer(pc.getAttribute("data-player")); return; }
-        if(ep){ tapEmptyPos(ep.getAttribute("data-emptypos")); return; }
+        if(ep){ tapEmptyPos(ep.getAttribute("data-emptypos"),ep.getAttribute("data-team")||""); return; }
+        if(bz && cur().selectedId){ tapBench(bz.getAttribute("data-bench")); return; }
         if(uz){ tapUit(); return; }
       }
     }
@@ -1165,12 +1332,14 @@
     if(state.view==="team" && tactBtn){ teamAction(tactBtn); return; }
 
     if(!actEl)return;
-    var a=actEl.getAttribute("data-action"), id=actEl.getAttribute("data-id");
+    var a=actEl.getAttribute("data-action"), id=actEl.getAttribute("data-id"), pit=actEl.getAttribute("data-veld")||"";
     switch(a){
       case "new-match": newMatch(); break;
       case "open-test": go("test"); break;
       case "test-5": newTestMatch("5"); break;
       case "test-6": newTestMatch("6"); break;
+      case "test-5-2": newTestMatch("5",true); break;
+      case "test-6-2": newTestMatch("6",true); break;
       case "thuis": newThuis=true; renderNieuw(); break;
       case "uit": newThuis=false; renderNieuw(); break;
       case "nieuw-go": createMatch(); break;
@@ -1199,9 +1368,9 @@
       case "card-open": if(cur().selectedId){ cardOpen=true; cornerOpen=false; renderMatch(); } else toast("Kies eerst een speler"); break;
       case "card-pick": applyCard(id); break;
       case "card-close": cardOpen=false; renderMatch(); break;
-      case "goal-voor": addGoal("voor"); break;
-      case "goal-tegen": addGoal("tegen"); break;
-      case "goal-undo": removeGoal(id); break;
+      case "goal-voor": addGoal("voor",pit); break;
+      case "goal-tegen": addGoal("tegen",pit); break;
+      case "goal-undo": removeGoal(id,pit); break;
       case "score-open": scoreOpen=!scoreOpen; renderMatch(); break;
       case "score-close": scoreOpen=false; renderMatch(); break;
       case "goal-del": delGoal(id); break;
@@ -1236,13 +1405,26 @@
     }
   });
 
-  function tapEmptyPos(posId){
+  function tapEmptyPos(posId,tm){
     var c=cur(); if(!c.selectedId){ toast("Kies eerst een speler"); return; }
     var p=mById(c.selectedId); if(!p)return; pushUndo();
+    var over = twoPitch() && teamOf(p)!==(tm||"");
     if(p.pos){ p.pos=posId; }
     else { p.pos=posId; p.present=true; p.stint=0; p.benchStint=0; }
+    p.team=tm||"";
     c.selectedId=null; save(true); renderMatch();
-    toast(p.name+" erin");
+    toast(p.name+(over?" naar "+pitchName(tm):" erin"));
+  }
+  // Speler naar de bank van een veldje, zonder dat er iemand voor terugkomt.
+  function tapBench(tm){
+    var c=cur(); if(!c.selectedId)return;
+    var p=mById(c.selectedId); if(!p)return;
+    if(!p.pos && teamOf(p)===(tm||"")){ c.selectedId=null; renderMatch(); return; }
+    pushUndo();
+    var wasField=!!p.pos;
+    p.pos=null; p.present=true; p.team=tm||""; p.stint=0; p.benchStint=0;
+    c.selectedId=null; save(true); renderMatch();
+    toast(p.name+" naar de bank"+(twoPitch()?" van "+pitchName(tm):"")+(wasField?", plek is vrij":""));
   }
   function tapUit(){
     var c=cur(); if(!c.selectedId){ toast("Tik eerst een speler aan"); return; }
@@ -1261,21 +1443,29 @@
     if(!c.selectedId){c.selectedId=p.id;toast(p.name+" gekozen, tik nu de wissel");renderMatch();return;}
     var sel=mById(c.selectedId), selField=!!sel.pos, pField=!!p.pos;
     if(selField && pField){
-      pushUndo(); var tmp=sel.pos; sel.pos=p.pos; p.pos=tmp;
+      pushUndo(); var tmp=sel.pos, tmt=teamOf(sel);
+      sel.pos=p.pos; sel.team=teamOf(p); p.pos=tmp; p.team=tmt;
       c.selectedId=null; save(true); renderMatch(); toast(sel.name+" en "+p.name+" ruilen van plek");
       return;
     }
     if(selField!==pField){
       pushUndo(); var out=selField?sel:p, inn=selField?p:sel;
-      inn.pos=out.pos; inn.onField=true; inn.present=true; inn.stint=0; inn.benchStint=0;
+      inn.pos=out.pos; inn.team=teamOf(out); inn.onField=true; inn.present=true; inn.stint=0; inn.benchStint=0;
       out.pos=null; out.onField=false; out.stint=0; out.benchStint=0;
       c.selectedId=null; save(true); renderMatch(); toast(inn.name+" erin voor "+out.name);
+      return;
+    }
+    // Twee spelers op de bank van verschillende veldjes ruilen van team.
+    if(twoPitch() && !selField && !pField && teamOf(sel)!==teamOf(p)){
+      pushUndo(); var bt=teamOf(sel); sel.team=teamOf(p); p.team=bt;
+      c.selectedId=null; save(true); renderMatch(); toast(sel.name+" en "+p.name+" ruilen van veld");
       return;
     }
     c.selectedId=p.id; toast(p.name+" gekozen, tik nu de wissel"); renderMatch();
   }
   var mdrag=null, mdragEnd=0;
-  function attachMatchDrag(){ var pit=document.getElementById("pitch"); if(pit)pit.addEventListener("pointerdown",startMatchDrag); }
+  function attachMatchDrag(){ var pits=document.querySelectorAll(".pitch[data-pitch]");
+    for(var i=0;i<pits.length;i++)pits[i].addEventListener("pointerdown",startMatchDrag); }
   function startMatchDrag(e){ if(matchGrp)return; var chip=e.target.closest("[data-player]"); if(!chip)return;
     mdrag={id:chip.getAttribute("data-player"),sx:e.clientX,sy:e.clientY,moved:false,ghost:null,src:chip,dx:0,dy:0};
     document.addEventListener("pointermove",moveMatchDrag); document.addEventListener("pointerup",endMatchDrag); }
@@ -1290,19 +1480,26 @@
     else { mdrag=null; } }
   function matchResolve(x,y){ var el=document.elementFromPoint(x,y);
     if(el){ var uz=el.closest("[data-uit]"); if(uz)return {kind:"uit"};
-      var ep=el.closest("[data-emptypos]"); if(ep)return {kind:"pos",pos:ep.getAttribute("data-emptypos")};
-      var pc=el.closest("[data-player]"); if(pc)return {kind:"player",id:pc.getAttribute("data-player")}; }
-    var pit=document.getElementById("pitch"); if(pit){ var r=pit.getBoundingClientRect();
-      if(x>=r.left-24&&x<=r.right+24&&y>=r.top-24&&y<=r.bottom+24){ var pid=nearestPos(x,y,r); var occ=null; cur().players.forEach(function(p){if(p.pos===pid)occ=p;});
-        return occ?{kind:"player",id:occ.id}:{kind:"pos",pos:pid}; } }
+      var ep=el.closest("[data-emptypos]"); if(ep)return {kind:"pos",pos:ep.getAttribute("data-emptypos"),team:ep.getAttribute("data-team")||""};
+      var pc=el.closest("[data-player]"); if(pc)return {kind:"player",id:pc.getAttribute("data-player")};
+      var bz=el.closest("[data-bench]"); if(bz)return {kind:"bench",team:bz.getAttribute("data-bench")||""}; }
+    var pit=pitchAt(x,y);
+    if(pit){ var r=pit.getBoundingClientRect(), tm=pit.getAttribute("data-pitch")||"";
+      var pid=nearestPos(x,y,r), occ=null;
+      cur().players.forEach(function(p){if(p.pos===pid && teamOf(p)===tm)occ=p;});
+      return occ?{kind:"player",id:occ.id}:{kind:"pos",pos:pid,team:tm}; }
     return null; }
   function matchDrop(id,t){ var c=cur(),A=mById(id); if(!A){renderMatch();return;} if(!t){renderMatch();return;}
     if(t.kind==="uit"){ pushUndo(); var wf=!!A.pos; A.present=false; A.pos=null; A.stint=0; if(wf)A.benchStint=0; save(true); renderMatch(); toast(A.name+" staat uit"); return; }
-    if(t.kind==="pos"){ pushUndo(); if(A.pos){A.pos=t.pos;} else {A.pos=t.pos;A.present=true;A.stint=0;A.benchStint=0;} save(true); renderMatch(); toast(A.name+" naar die plek"); return; }
+    if(t.kind==="bench"){ if(!A.pos && teamOf(A)===t.team){renderMatch();return;}
+      pushUndo(); A.pos=null; A.present=true; A.team=t.team; A.stint=0; A.benchStint=0; save(true); renderMatch();
+      toast(A.name+" naar de bank"+(twoPitch()?" van "+pitchName(t.team):"")); return; }
+    if(t.kind==="pos"){ pushUndo(); if(A.pos){A.pos=t.pos;} else {A.pos=t.pos;A.present=true;A.stint=0;A.benchStint=0;} A.team=t.team||""; save(true); renderMatch(); toast(A.name+" naar die plek"); return; }
     if(t.kind==="player"){ var B=mById(t.id); if(!B||B.id===A.id){renderMatch();return;} if(!B.present){toast("Die speler staat uit");renderMatch();return;}
       pushUndo(); var aF=!!A.pos,bF=!!B.pos;
-      if(aF&&bF){ var tmp=A.pos;A.pos=B.pos;B.pos=tmp; save(true); renderMatch(); toast(A.name+" en "+B.name+" ruilen"); }
-      else { var out=aF?A:B, inn=aF?B:A; inn.pos=out.pos; inn.present=true; inn.stint=0; inn.benchStint=0; out.pos=null; out.stint=0; out.benchStint=0; save(true); renderMatch(); toast(inn.name+" erin voor "+out.name); }
+      if(aF&&bF){ var tmp=A.pos,tmt=teamOf(A); A.pos=B.pos;A.team=teamOf(B); B.pos=tmp;B.team=tmt; save(true); renderMatch(); toast(A.name+" en "+B.name+" ruilen"); }
+      else if(!aF&&!bF){ if(twoPitch()&&teamOf(A)!==teamOf(B)){ var bt=teamOf(A); A.team=teamOf(B); B.team=bt; save(true); renderMatch(); toast(A.name+" en "+B.name+" ruilen van veld"); } else renderMatch(); }
+      else { var out=aF?A:B, inn=aF?B:A; inn.pos=out.pos; inn.team=teamOf(out); inn.present=true; inn.stint=0; inn.benchStint=0; out.pos=null; out.stint=0; out.benchStint=0; save(true); renderMatch(); toast(inn.name+" erin voor "+out.name); }
       return; } }
 
   function startToggle(){
@@ -1382,8 +1579,10 @@
   }
   function summaryText(m){
     var lines=[m.label, datum(m.date)+"  totale tijd "+fmt(m.elapsed), ""];
+    var twoM=!!(m.pitches && m.pitches.length>1);
+    function pn(id){ var ps=m.pitches||[]; for(var i=0;i<ps.length;i++)if(ps[i].id===(id||""))return ps[i].name; return ""; }
     m.players.slice().sort(function(a,b){return b.total-a.total;}).forEach(function(p){
-      lines.push(p.name+"  "+fmt(p.total)); });
+      lines.push(p.name+"  "+fmt(p.total)+(twoM?"  "+pn(p.team):"")); });
     lines.push(""); lines.push("via Interchange AMHC");
     return lines.join("\n");
   }
