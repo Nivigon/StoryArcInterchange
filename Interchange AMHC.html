@@ -65,6 +65,27 @@
   .scoreval{background:#fff;color:#12261a;border-radius:8px;padding:4px 10px;font-weight:800;font-variant-numeric:tabular-nums;font-size:1.02rem;cursor:pointer;min-width:20px;text-align:center}
   .scorepanel{position:fixed;top:118px;left:12px;background:#fff;border:1px solid var(--line);border-radius:12px;
     box-shadow:0 10px 28px rgba(0,0,0,.28);padding:10px 12px;z-index:50;min-width:240px;max-width:340px;max-height:72vh;overflow:auto}
+  .rl.tap{cursor:pointer}
+  .rl .rl-x{font-size:.78rem;font-weight:700;color:var(--muted)}
+  /* invulscherm bij een doelpunt */
+  .gs-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60}
+  .gsheet{position:fixed;z-index:61;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(600px,94vw);max-height:88vh;overflow:auto;background:#fff;border-radius:16px;
+    box-shadow:0 18px 44px rgba(0,0,0,.4);padding:12px 14px calc(env(safe-area-inset-bottom) + 12px)}
+  .gs-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .gs-t{font-weight:800;font-size:1.05rem}
+  .gs-sub{color:var(--muted);font-size:.85rem;flex:1}
+  .gs-lbl{font-weight:800;font-size:.72rem;letter-spacing:.06em;color:var(--muted);margin:11px 2px 5px}
+  .gs-row{display:flex;flex-wrap:wrap;gap:6px}
+  .gs-chip{border:1px solid var(--line);background:#fff;color:#12261a;border-radius:20px;
+    padding:9px 13px;font-weight:800;font-size:.95rem;line-height:1}
+  .gs-chip.bnk{background:var(--bench);color:#3a443d}
+  .gs-chip.uit{background:#fff;color:#9aa69e}
+  .gs-chip.alt{border-style:dashed;color:var(--muted)}
+  .gs-chip.sm{font-size:.82rem;padding:7px 10px}
+  .gs-chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .gs-f{display:flex;gap:8px;margin-top:14px}
+  .gs-f .btn{flex:1}
   .coachbtn.undo{color:var(--accent);border-color:var(--accent)}
   .hright{display:flex;align-items:center;gap:8px;flex-shrink:0}
   .warnpill{background:var(--danger);color:#fff;font-weight:800;padding:7px 13px;border-radius:20px;font-size:.85rem;white-space:nowrap;cursor:pointer;
@@ -317,7 +338,7 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.3";
+  var VERSION = "0.4";
   var LINES = ["Keeper","Verdediging","Middenveld","Aanval"];
   var POSITIONS = [
     {id:"SPL",x:32,y:13},{id:"SPR",x:68,y:13},
@@ -461,7 +482,7 @@
   function bench(t){return present(t).filter(function(p){return !p.pos;});}
 
   // ---------- navigation ----------
-  function go(v){state.view=v;save(true);renderView();}
+  function go(v){state.view=v;goalEdit=null;save(true);renderView();}
 
   // ---------- match lifecycle ----------
   var newThuis = true;
@@ -469,6 +490,8 @@
   var cornerOpen=false, corner=null;
   var cardOpen=false;
   var scoreOpen=false;
+  // Het doelpunt waarvan het invulscherm openstaat (wie scoorde, assist, hoe).
+  var goalEdit=null;
   // Doelpunten horen bij een veldje. Bij een gewone wedstrijd is dat het lege
   // veld, zodat oude wedstrijden precies zo blijven werken als eerst.
   function goalsFor(pid){ var c=cur(); return ((c&&c.goals)||[]).filter(function(x){return (x.pitch||"")===(pid||"");}); }
@@ -476,14 +499,144 @@
   function goalLabel(pid){ return twoPitch()?(pitchName(pid)+": "):""; }
   function addGoal(team,pid){ pid=pid||""; var c=cur(); if(!c)return; if(!c.goals)c.goals=[];
     var t=twoPitch()?pid:null;
-    c.goals.push({id:"g"+Date.now(),team:team,pitch:pid,q:c.quarter,t:Math.round(c.elapsed),on:field(t).map(function(p){return p.name;}),off:bench(t).map(function(p){return p.name;})});
+    // De stand gaat meteen omhoog. Wie scoorde, wie de assist gaf en hoe de
+    // bal erin ging vul je daarna in het invulscherm in, of helemaal niet.
+    var g={id:"g"+Date.now(),team:team,pitch:pid,q:c.quarter,t:Math.round(c.elapsed),
+      on:field(t).map(function(p){return p.name;}), off:bench(t).map(function(p){return p.name;}),
+      src:(corner!==null?"sc":"veld"), scVar:(corner!==null?corner:null),
+      scorerId:null, scorer:"", scorerKind:(team==="voor"?"open":"tegenstander"),
+      assistId:null, assist:"", assistKind:"open"};
+    c.goals.push(g);
+    goalEdit=g.id; scoreOpen=false; cornerOpen=false; cardOpen=false;
     save(true); renderMatch(); toast(goalLabel(pid)+(team==="voor"?"Doelpunt voor":"Tegendoelpunt")); }
-  function delGoal(gid){ var c=cur(); c.goals=(c.goals||[]).filter(function(x){return x.id!==gid;}); save(true); renderMatch(); }
+  function delGoal(gid){ var c=cur(); c.goals=(c.goals||[]).filter(function(x){return x.id!==gid;});
+    if(goalEdit===gid)goalEdit=null; save(true); renderMatch(); }
   function removeGoal(team,pid){ pid=pid||""; var c=cur(); var g=goalsFor(pid);
     var idx=-1; for(var i=0;i<g.length;i++)if(g[i].team===team)idx=i; // laatste van deze kant
     if(idx<0){ toast(goalLabel(pid)+(team==="voor"?"Geen doelpunt voor om weg te halen":"Geen tegendoelpunt om weg te halen")); return; }
     var gid=g[idx].id; c.goals=c.goals.filter(function(x){return x.id!==gid;});
+    if(goalEdit===gid)goalEdit=null;
     save(true); renderMatch(); toast(goalLabel(pid)+(team==="voor"?"Doelpunt voor weggehaald":"Tegendoelpunt weggehaald")); }
+
+  // ---------- doelpunt invullen ----------
+  // Hoe de bal erin ging. Een strafcorner kun je koppelen aan een variant uit
+  // CORNERS, zodat je later ziet welke corner wel en niet scoort.
+  var GSRC=[["veld","Veld"],["sc","Strafcorner"],["sb","Strafbal"]];
+  function goalById(gid){ var c=cur(); var gs=(c&&c.goals)||[];
+    for(var i=0;i<gs.length;i++)if(gs[i].id===gid)return gs[i]; return null; }
+  // Spelers om uit te kiezen: eerst wie in het veld staat, dan de bank, dan wie
+  // eruit is. Bij twee veldjes alleen de spelers van dat veldje.
+  function goalPlayers(g){
+    var c=cur(); if(!c)return [];
+    var list=c.players.filter(function(p){ return !twoPitch() || teamOf(p)===(g.pitch||""); });
+    return list.slice().sort(function(a,b){
+      var ra=a.pos?0:(a.present?1:2), rb=b.pos?0:(b.present?1:2);
+      if(ra!==rb)return ra-rb;
+      return a.name.localeCompare(b.name); });
+  }
+  function goalWho(g){
+    if(g.scorerKind==="eigen")return "eigen goal"+(g.scorer?" ("+g.scorer+")":"");
+    if(g.scorerKind==="speler"&&g.scorer)return g.scorer;
+    if(g.scorerKind==="onduidelijk")return "onduidelijk";
+    if(g.team!=="voor")return "tegenstander";
+    return "nog invullen";
+  }
+  function goalAssistTxt(g){
+    if(g.assistKind==="speler"&&g.assist)return "assist "+g.assist;
+    if(g.assistKind==="geen")return "geen assist";
+    if(g.assistKind==="onduidelijk")return "assist onduidelijk";
+    return "";
+  }
+  function goalSrcTxt(g,lang){
+    if(g.src==="sc")return "strafcorner"+(g.scVar!=null?" "+(g.scVar+1)+(lang&&CORNERS[g.scVar]?" ("+CORNERS[g.scVar]+")":""):"");
+    if(g.src==="sb")return "strafbal";
+    return "veld";
+  }
+  // pname is de naam van het veldje, of leeg bij een gewone wedstrijd.
+  function goalLine(g,pname){
+    var d=[];
+    if(pname)d.push(pname);
+    d.push("K"+g.q); d.push(fmt(g.t)); d.push(g.team==="voor"?"voor":"tegen");
+    d.push(goalWho(g));
+    var a=goalAssistTxt(g); if(a && g.team==="voor")d.push(a);
+    d.push(goalSrcTxt(g));
+    return d.join(" · ");
+  }
+  // Doelpunten en assists per speler, plus eigen goals en corner-treffers.
+  function goalStats(goals){
+    var per={};
+    function row(n){ if(!per[n])per[n]={d:0,a:0,sc:0,eig:0}; return per[n]; }
+    (goals||[]).forEach(function(g){
+      if(g.team==="voor"){
+        if(g.scorerKind==="speler"&&g.scorer){ var r=row(g.scorer); r.d++; if(g.src==="sc")r.sc++; }
+        if(g.assistKind==="speler"&&g.assist)row(g.assist).a++;
+      } else if(g.scorerKind==="eigen"&&g.scorer){ row(g.scorer).eig++; }
+    });
+    return per;
+  }
+  function statTxt(s){
+    var d=[]; if(s.d)d.push(s.d+"x doel"+(s.sc?" ("+s.sc+" sc)":"")); if(s.a)d.push(s.a+"x assist");
+    if(s.eig)d.push(s.eig+"x eigen goal"); return d.join(" · ");
+  }
+  function setGoalSrc(v){ var g=goalById(goalEdit); if(!g)return;
+    g.src=v; if(v!=="sc")g.scVar=null; save(true); renderMatch(); }
+  function setGoalVar(v){ var g=goalById(goalEdit); if(!g)return;
+    g.scVar=(v===""?null:parseInt(v,10)); g.src="sc"; save(true); renderMatch(); }
+  function setGoalScorer(v){ var g=goalById(goalEdit); if(!g)return;
+    var leeg=(g.team==="voor"?"open":"tegenstander");
+    if(v==="_eigen"){ g.scorerKind="eigen"; g.scorerId=null; g.scorer=""; }
+    else if(v==="_onduidelijk"){ g.scorerKind="onduidelijk"; g.scorerId=null; g.scorer=""; }
+    else if(v==="_tegen"){ g.scorerKind="tegenstander"; g.scorerId=null; g.scorer=""; }
+    else { var p=mById(v); if(!p)return;
+      if(g.scorerId===p.id){ g.scorerId=null; g.scorer=""; g.scorerKind=leeg; }
+      else { g.scorerId=p.id; g.scorer=p.name; g.scorerKind=(g.team==="voor"?"speler":"eigen"); } }
+    save(true); renderMatch(); }
+  function setGoalAssist(v){ var g=goalById(goalEdit); if(!g)return;
+    if(v==="_geen"){ g.assistKind="geen"; g.assistId=null; g.assist=""; }
+    else if(v==="_onduidelijk"){ g.assistKind="onduidelijk"; g.assistId=null; g.assist=""; }
+    else { var p=mById(v); if(!p)return;
+      if(g.assistId===p.id){ g.assistId=null; g.assist=""; g.assistKind="open"; }
+      else { g.assistId=p.id; g.assist=p.name; g.assistKind="speler"; } }
+    save(true); renderMatch(); }
+  function goalSheet(){
+    if(!goalEdit)return "";
+    var g=goalById(goalEdit); if(!g){ goalEdit=null; return ""; }
+    var voor=(g.team==="voor");
+    var pls=goalPlayers(g);
+    function pchips(act,sel){ return pls.map(function(p){
+      var cls="gs-chip"+(p.pos?"":(p.present?" bnk":" uit"))+(sel===p.id?" on":"");
+      return '<button class="'+cls+'" data-action="'+act+'" data-id="'+p.id+'">'+esc(p.name)+'</button>'; }).join(""); }
+    var h='<div class="gs-ov" data-action="goal-done"></div><div class="gsheet">';
+    h+='<div class="gs-h"><span class="gs-t">'+(voor?"Doelpunt voor":"Tegendoelpunt")+'</span>'+
+       '<span class="gs-sub">'+(twoPitch()?esc(pitchName(g.pitch))+' &middot; ':'')+'kwart '+g.q+' &middot; '+fmt(g.t)+'</span>'+
+       '<button class="mini" data-action="goal-done">Klaar</button></div>';
+    h+='<div class="gs-lbl">HOE</div><div class="gs-row">'+GSRC.map(function(s){
+        return '<button class="gs-chip'+((g.src||"veld")===s[0]?" on":"")+'" data-action="goal-src" data-id="'+s[0]+'">'+s[1]+'</button>'; }).join("")+'</div>';
+    if((g.src||"veld")==="sc"){
+      h+='<div class="gs-row" style="margin-top:6px">'+CORNERS.map(function(n,i){
+          return '<button class="gs-chip sm'+(g.scVar===i?" on":"")+'" data-action="goal-scvar" data-id="'+i+'">'+(i+1)+'. '+esc(n)+'</button>'; }).join("")+
+        '<button class="gs-chip sm alt'+(g.scVar==null?" on":"")+'" data-action="goal-scvar" data-id="">Variant onbekend</button></div>';
+    }
+    if(voor){
+      h+='<div class="gs-lbl">WIE SCOORDE</div><div class="gs-row">'+
+        pchips("goal-scorer",g.scorerKind==="speler"?g.scorerId:null)+
+        '<button class="gs-chip alt'+(g.scorerKind==="eigen"?" on":"")+'" data-action="goal-scorer" data-id="_eigen">Eigen goal tegenstander</button>'+
+        '<button class="gs-chip alt'+(g.scorerKind==="onduidelijk"?" on":"")+'" data-action="goal-scorer" data-id="_onduidelijk">Onduidelijk</button></div>';
+      h+='<div class="gs-lbl">ASSIST</div><div class="gs-row">'+
+        pchips("goal-assist",g.assistKind==="speler"?g.assistId:null)+
+        '<button class="gs-chip alt'+(g.assistKind==="geen"?" on":"")+'" data-action="goal-assist" data-id="_geen">Geen</button>'+
+        '<button class="gs-chip alt'+(g.assistKind==="onduidelijk"?" on":"")+'" data-action="goal-assist" data-id="_onduidelijk">Onduidelijk</button></div>';
+    } else {
+      h+='<div class="gs-lbl">WIE MAAKTE HEM</div><div class="gs-row">'+
+        '<button class="gs-chip alt'+(g.scorerKind==="tegenstander"?" on":"")+'" data-action="goal-scorer" data-id="_tegen">Tegenstander</button>'+
+        '<button class="gs-chip alt'+(g.scorerKind==="onduidelijk"?" on":"")+'" data-action="goal-scorer" data-id="_onduidelijk">Onduidelijk</button></div>';
+      h+='<div class="gs-lbl">EIGEN GOAL, TIK WIE</div><div class="gs-row">'+
+        pchips("goal-scorer",g.scorerKind==="eigen"?g.scorerId:null)+'</div>';
+    }
+    h+='<div class="gs-f"><button class="btn light" data-action="goal-done">Klaar</button>'+
+       '<button class="btn danger" data-action="goal-del" data-id="'+g.id+'">Weghalen</button></div>';
+    return h+'</div>';
+  }
   function scorePanel(){ if(!scoreOpen)return ""; var c=cur(); var g=(c.goals||[]).slice().sort(function(a,b){return a.t-b.t;});
     var voor=g.filter(function(x){return x.team==="voor";}).length, tegen=g.filter(function(x){return x.team==="tegen";}).length;
     var per={}; g.forEach(function(x){
@@ -491,12 +644,17 @@
       (x.off||[]).forEach(function(n){per[n]=per[n]||{v:0,t:0,vo:0,to:0}; if(x.team==="voor")per[n].vo++; else per[n].to++;});
     });
     var names=Object.keys(per).sort(function(a,b){return (per[b].v-per[b].t)-(per[a].v-per[a].t);});
-    var glist=g.length? g.map(function(x){return '<div class="rl"><span style="flex:1">'+(twoPitch()?esc(pitchName(x.pitch))+' &middot; ':'')+'Kwart '+x.q+' &middot; '+fmt(x.t)+' &middot; '+(x.team==="voor"?"voor":"tegen")+'</span><button class="btn row-x" data-action="goal-del" data-id="'+x.id+'">&times;</button></div>';}).join("") : '<div class="rl empty2">Nog geen doelpunten</div>';
+    var glist=g.length? g.map(function(x){return '<div class="rl tap" data-action="goal-edit" data-id="'+x.id+'"><span style="flex:1">'+esc(goalLine(x,twoPitch()?pitchName(x.pitch):""))+'</span><button class="btn row-x" data-action="goal-del" data-id="'+x.id+'">&times;</button></div>';}).join("") : '<div class="rl empty2">Nog geen doelpunten</div>';
+    var st=goalStats(g);
+    var stn=Object.keys(st).sort(function(a,b){return (st[b].d*2+st[b].a)-(st[a].d*2+st[a].a);});
+    var slist=stn.map(function(n){return '<div class="rl"><span style="flex:1">'+esc(n)+'</span><span class="rl-x">'+esc(statTxt(st[n]))+'</span></div>';}).join("");
     var plist=names.map(function(n){return '<div class="rl"><span style="flex:1">'+esc(n)+'</span><span style="font-weight:800;font-variant-numeric:tabular-nums;font-size:.85rem">in +'+per[n].v+'/-'+per[n].t+' &middot; uit +'+per[n].vo+'/-'+per[n].to+'</span></div>';}).join("");
     var kop = twoPitch()
       ? pitches().map(function(t){return esc(t.name)+' '+scoreFor(t.id,"voor")+' - '+scoreFor(t.id,"tegen");}).join(' &middot; ')
       : 'STAND '+voor+' - '+tegen;
     return '<div class="scorepanel"><div class="rl-h">'+kop+' <button class="mini" data-action="score-close">sluiten</button></div>'+glist+
+      (glist&&g.length?'<div class="foot" style="margin:6px 2px 0;font-size:.78rem">tik een doelpunt om het in te vullen</div>':'')+
+      (slist?'<div class="rl-h" style="margin-top:10px">DOELPUNTEN EN ASSISTS</div>'+slist:'')+
       (plist?'<div class="rl-h" style="margin-top:10px">PER SPELER (in veld / op bank)</div>'+plist:'')+'</div>'; }
   function cardColor(t){return t==="groen"?"#2e9e4f":t==="geel"?"#f2c200":"#d62828";}
   var CORNERS=["afschuif","ook afschuif","nog meer afschuif","mega veel afschuif"];
@@ -844,7 +1002,7 @@
         '<div class="side">'+sideHtml+'</div>'+
         '</div></div>';
     }
-    main.innerHTML=body+cornerPanel()+cardPanel()+scorePanel();
+    main.innerHTML=body+cornerPanel()+cardPanel()+scorePanel()+goalSheet();
     if(!matchGrp) attachMatchDrag();
     refreshDynamic();
   }
@@ -1290,7 +1448,19 @@
         (x.off||[]).forEach(function(n){per[n]=per[n]||{v:0,t:0,vo:0,to:0}; if(x.team==="voor")per[n].vo++; else per[n].to++;});
       });
       var nm=Object.keys(per).sort(function(a,b){return (per[b].v-per[b].t)-(per[a].v-per[a].t);});
-      h+='<div class="sec"><h3>Doelpunten '+kopM+'</h3><p class="sub">in veld en op bank toen er gescoord werd</p>';
+      // Logboek: elk doelpunt op volgorde, met maker, assist en hoe hij viel.
+      h+='<div class="sec"><h3>Logboek '+kopM+'</h3><p class="sub">elk doelpunt op volgorde</p>';
+      m.goals.slice().sort(function(a,b){return a.t-b.t;}).forEach(function(x){
+        h+='<div class="stat"><span class="s-nm" style="font-weight:600">'+esc(goalLine(x,twoM?pnameM(x.pitch):""))+'</span></div>'; });
+      h+='</div>';
+      var st=goalStats(m.goals);
+      var stn=Object.keys(st).sort(function(a,b){return (st[b].d*2+st[b].a)-(st[a].d*2+st[a].a);});
+      if(stn.length){
+        h+='<div class="sec"><h3>Doelpunten en assists</h3><p class="sub">sc = uit een strafcorner</p>';
+        stn.forEach(function(n){ h+='<div class="stat"><span class="s-nm">'+esc(n)+'</span><span class="s-tm" style="font-size:.9rem">'+esc(statTxt(st[n]))+'</span></div>'; });
+        h+='</div>';
+      }
+      h+='<div class="sec"><h3>In het veld bij doelpunten '+kopM+'</h3><p class="sub">in veld en op bank toen er gescoord werd</p>';
       nm.forEach(function(n){ h+='<div class="stat"><span class="s-nm">'+esc(n)+'</span><span class="s-tm" style="font-size:.9rem">in +'+per[n].v+'/-'+per[n].t+' &middot; uit +'+per[n].vo+'/-'+per[n].to+'</span></div>'; });
       h+='</div>';
     }
@@ -1374,6 +1544,12 @@
       case "score-open": scoreOpen=!scoreOpen; renderMatch(); break;
       case "score-close": scoreOpen=false; renderMatch(); break;
       case "goal-del": delGoal(id); break;
+      case "goal-edit": goalEdit=id; renderMatch(); break;
+      case "goal-done": goalEdit=null; save(true); renderMatch(); break;
+      case "goal-src": setGoalSrc(id); break;
+      case "goal-scvar": setGoalVar(id); break;
+      case "goal-scorer": setGoalScorer(id); break;
+      case "goal-assist": setGoalAssist(id); break;
       case "corner-toggle": cornerOpen=!cornerOpen; renderMatch(); break;
       case "corner-pick": corner=parseInt(id,10); cornerOpen=false; renderMatch(); break;
       case "corner-clear": corner=null; cornerOpen=false; renderMatch(); break;
@@ -1583,6 +1759,13 @@
     function pn(id){ var ps=m.pitches||[]; for(var i=0;i<ps.length;i++)if(ps[i].id===(id||""))return ps[i].name; return ""; }
     m.players.slice().sort(function(a,b){return b.total-a.total;}).forEach(function(p){
       lines.push(p.name+"  "+fmt(p.total)+(twoM?"  "+pn(p.team):"")); });
+    if(m.goals && m.goals.length){
+      lines.push(""); lines.push("Doelpunten");
+      m.goals.slice().sort(function(a,b){return a.t-b.t;}).forEach(function(g){
+        lines.push(goalLine(g,twoM?pn(g.pitch):"")); });
+      var st=goalStats(m.goals), stn=Object.keys(st).sort(function(a,b){return (st[b].d*2+st[b].a)-(st[a].d*2+st[a].a);});
+      if(stn.length){ lines.push(""); stn.forEach(function(n){ lines.push(n+"  "+statTxt(st[n])); }); }
+    }
     lines.push(""); lines.push("via Interchange AMHC");
     return lines.join("\n");
   }
@@ -1628,6 +1811,8 @@
         label:{stringValue:String(m.label)},
         speeldatum:{stringValue:String(m.date)},
         elapsed:{integerValue:String(Math.round(m.elapsed))},
+        goals_voor:{integerValue:String(((m.goals)||[]).filter(function(g){return g.team==="voor";}).length)},
+        goals_tegen:{integerValue:String(((m.goals)||[]).filter(function(g){return g.team==="tegen";}).length)},
         data:{stringValue:JSON.stringify(m)}
       }};
       return fetch(furl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields)})
