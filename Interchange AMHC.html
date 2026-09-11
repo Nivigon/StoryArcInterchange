@@ -597,6 +597,97 @@
     return '<div class="scorepanel"><div class="rl-h">'+kop+' <button class="mini" data-action="score-close">sluiten</button></div>'+glist+
       (slist?'<div class="rl-h" style="margin-top:10px">GOALS EN ASSISTS</div>'+slist:'')+
       (plist?'<div class="rl-h" style="margin-top:10px">PER SPELER (in veld / op bank)</div>'+plist:'')+'</div>'; }
+  // ---------- wisselog ----------
+  // Elke verandering in het veld wordt met tijdstempel bewaard, zodat je
+  // achteraf kunt zien wie wanneer op het veld stond. We vergelijken elke halve
+  // seconde de situatie met de vorige; zo komt elke manier van wisselen erin,
+  // of je nu sleept, tikt, een kaart geeft of iets terugdraait.
+  var lastPos=null;
+  function posKey(p){ return !p.present ? "uit" : (p.pos ? "veld:"+p.pos : "bank"); }
+  function snapPos(){ var c=cur(), m={}; if(c)c.players.forEach(function(p){ m[p.id]=posKey(p); }); return m; }
+  function resetLog(){ lastPos=null; }
+  function logStart(){
+    var c=cur(); if(!c)return; if(!c.log)c.log=[];
+    c.players.forEach(function(p){ if(!p.present)return;
+      c.log.push({k:"opstelling",t:0,q:c.quarter,qt:0,team:teamOf(p),id:p.id,naam:p.name,van:"start",naar:posKey(p)}); });
+    lastPos=snapPos(); save(true);
+  }
+  function logQuarter(){ var c=cur(); if(!c)return; if(!c.log)c.log=[];
+    c.log.push({k:"kwart",t:Math.round(c.elapsed||0),q:c.quarter,qt:0}); }
+  function logEvents(){
+    var c=cur(); if(!c){ lastPos=null; return; }
+    var now=snapPos();
+    // Vóór de aftrap noteren we niets; dat is het klaarzetten van de opstelling.
+    if(!lastPos || !c.startedAt){ lastPos=now; return; }
+    var ev=[];
+    Object.keys(now).forEach(function(id){
+      var was=lastPos[id], is=now[id];
+      if(was===undefined || was===is)return;
+      var p=mById(id); if(!p)return;
+      ev.push({k:"wissel",t:Math.round(c.elapsed||0),q:c.quarter,qt:Math.round(c.qElapsed||0),
+        team:teamOf(p),id:id,naam:p.name,van:was,naar:is});
+    });
+    lastPos=now;
+    if(ev.length){ if(!c.log)c.log=[]; c.log=c.log.concat(ev); save(true); }
+  }
+  function isVeld(s){ return String(s||"").indexOf("veld:")===0; }
+  function logPos(s){ return String(s||"").slice(5); }
+  // Eén regel uit het wisselog in gewone taal.
+  function evDesc(e){
+    var van=e.van, naar=e.naar;
+    if(isVeld(van)&&isVeld(naar)) return e.naam+" van "+logPos(van)+" naar "+logPos(naar);
+    if(isVeld(naar)) return e.naam+" erin op "+logPos(naar)+(van==="uit"?" (stond uit)":"");
+    if(isVeld(van)) return e.naam+" eruit"+(naar==="uit"?", staat uit":"");
+    if(naar==="uit") return e.naam+" staat uit";
+    if(van==="uit") return e.naam+" terug op de bank";
+    return e.naam;
+  }
+  // Wissels op hetzelfde moment koppelen we: "X erin voor Y".
+  function logLines(m){
+    var ev=(m&&m.log)||[]; if(!ev.length)return [];
+    var out=[], i=0;
+    while(i<ev.length){
+      var e=ev[i], groep=[e]; i++;
+      while(i<ev.length && ev[i].k===e.k && ev[i].t===e.t && ev[i].q===e.q){ groep.push(ev[i]); i++; }
+      if(e.k==="kwart"){ out.push({t:e.t,q:e.q,tekst:"Kwart "+e.q+" begint"}); continue; }
+      if(e.k==="opstelling"){
+        var veld=groep.filter(function(x){return isVeld(x.naar);}).map(function(x){return x.naam+" ("+logPos(x.naar)+")";});
+        var bank=groep.filter(function(x){return x.naar==="bank";}).map(function(x){return x.naam;});
+        out.push({t:e.t,q:e.q,tekst:"Opstelling: "+veld.join(", ")+(bank.length?" · bank: "+bank.join(", "):"")});
+        continue;
+      }
+      var erin=groep.filter(function(x){return isVeld(x.naar)&&!isVeld(x.van);});
+      var eruit=groep.filter(function(x){return isVeld(x.van)&&!isVeld(x.naar);});
+      var rest=groep.filter(function(x){return erin.indexOf(x)<0 && eruit.indexOf(x)<0;});
+      while(erin.length && eruit.length){
+        var a=erin.shift();
+        var bi=0; for(var z=0;z<eruit.length;z++)if(eruit[z].team===a.team){bi=z;break;}
+        var b=eruit.splice(bi,1)[0];
+        out.push({t:a.t,q:a.q,tekst:a.naam+" erin voor "+b.naam+" op "+logPos(a.naar)+
+          (b.naar==="uit"?" ("+b.naam+" staat uit)":"")});
+      }
+      erin.concat(eruit).concat(rest).forEach(function(x){ out.push({t:x.t,q:x.q,tekst:evDesc(x)}); });
+    }
+    return out;
+  }
+  // Hoe vaak en hoe lang iemand aan de beurt was, uit het wisselog.
+  function stintStats(m){
+    var ev=(m&&m.log)||[]; if(!ev.length)return {names:[],per:{}};
+    var open={}, per={}, ord=[];
+    function row(n){ if(!per[n]){per[n]={n:0,langst:0,totaal:0};ord.push(n);} return per[n]; }
+    function inVeld(naam,t){ if(open[naam]==null)open[naam]=t; }
+    function uitVeld(naam,t){ if(open[naam]==null)return; var d=Math.max(0,t-open[naam]); open[naam]=null;
+      var r=row(naam); r.n++; r.totaal+=d; if(d>r.langst)r.langst=d; }
+    ev.forEach(function(e){
+      if(e.k==="kwart")return;
+      if(isVeld(e.naar) && !isVeld(e.van)) inVeld(e.naam,e.t);
+      else if(isVeld(e.van) && !isVeld(e.naar)) uitVeld(e.naam,e.t);
+    });
+    var eind=Math.round((m&&m.elapsed)||0);
+    Object.keys(open).forEach(function(n){ if(open[n]!=null)uitVeld(n,eind); });
+    ord.sort(function(a,b){ return per[b].n-per[a].n || a.localeCompare(b); });
+    return {names:ord,per:per};
+  }
   function cardColor(t){return t==="groen"?"#2e9e4f":t==="geel"?"#f2c200":"#d62828";}
   var CORNERS=["afschuif","ook afschuif","nog meer afschuif","mega veel afschuif"];
   var rolMode=false, activeRole=null;
@@ -620,7 +711,9 @@
       ? "Kwart "+c.quarter+" is nog niet op de streep. Toch naar kwart "+(c.quarter+1)+"? De klok stopt dan."
       : "Kwart "+c.quarter+" afsluiten en naar kwart "+(c.quarter+1)+"? De klok stopt dan.";
     if(!confirm(vraag)) return;
-    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.running=false; c.lastTick=Date.now(); save(true); renderMatch(); toast("Kwart "+c.quarter); }
+    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.running=false; c.lastTick=Date.now();
+    if(c.startedAt)logQuarter();
+    save(true); renderMatch(); toast("Kwart "+c.quarter); }
   var coachMode=false, coachTimer=null;
   var audioCtx=null, prevMissing=false, lastBeep=0, warnMuted=false;
   function unlockAudio(){ try{ if(!audioCtx){var AC=window.AudioContext||window.webkitAudioContext; if(AC)audioCtx=new AC();} if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume(); }catch(e){} }
@@ -679,7 +772,7 @@
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
     applyDefaultPreset(state.current);
-    save(true); undoStack=[]; go("opstelling");
+    save(true); undoStack=[]; resetLog(); go("opstelling");
   }
   function applyDefault(m){
     var d=state.defaults; if(!d)return;
@@ -781,7 +874,7 @@
     matchGrp=false; activeGroup=null; coachMode=false; warnMuted=false; goalEdit=null;
     state.history.unshift(JSON.parse(JSON.stringify(c)));
     queueMatch(c.id);
-    undoStack=[]; releaseWake();
+    undoStack=[]; resetLog(); releaseWake();
     state.current=null; state.detailId=c.id; save(true); go("detail");
   }
 
@@ -1034,7 +1127,7 @@
         present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
     if(two) splitTeams(m.players,m.pitches.map(function(t){return t.id;}));
-    state.current=m; save(true); undoStack=[]; go("opstelling");
+    state.current=m; save(true); undoStack=[]; resetLog(); go("opstelling");
   }
 
   // ---------- nieuwe wedstrijd ----------
@@ -1408,6 +1501,22 @@
       nm.forEach(function(n){ h+='<div class="stat"><span class="s-nm">'+esc(n)+'</span><span class="s-tm" style="font-size:.9rem">in +'+per[n].v+'/-'+per[n].t+' &middot; uit +'+per[n].vo+'/-'+per[n].to+'</span></div>'; });
       h+='</div>';
     }
+    // Wisselog: het verloop van de wedstrijd en hoe vaak iemand aan de beurt was.
+    var beurten=stintStats(m), rijen=logLines(m);
+    if(beurten.names.length){
+      h+='<div class="sec"><h3>Beurten</h3><p class="sub">hoe vaak iemand het veld in kwam en hoe lang de langste beurt duurde</p>';
+      beurten.names.forEach(function(n){ var b=beurten.per[n];
+        h+='<div class="stat"><span><span class="s-nm">'+esc(n)+'</span> <span class="s-ln">'+b.n+(b.n===1?' beurt':' beurten')+'</span></span>'+
+           '<span class="s-tm" style="font-size:.95rem">langst '+fmt(b.langst)+'</span></div>'; });
+      h+='</div>';
+    }
+    if(rijen.length){
+      h+='<div class="sec"><h3>Wisselog</h3><p class="sub">elke verandering in het veld, met de tijd op de wedstrijdklok</p>';
+      rijen.forEach(function(r){
+        h+='<div class="stat"><span><span class="s-nm" style="font-weight:600;font-size:.98rem">'+esc(r.tekst)+'</span></span>'+
+           '<span class="s-tm" style="font-size:.9rem">'+fmt(r.t)+'</span></div>'; });
+      h+='</div>';
+    }
     h+='<button class="btn wide" data-action="share-summary" data-id="'+m.id+'">Deel speeltijden</button>';
     h+='<button class="btn danger wide" data-action="del-detail" data-id="'+m.id+'" style="margin-top:8px">Deze wedstrijd verwijderen</button>';
     h+='</div></div>';
@@ -1628,7 +1737,8 @@
     var c=cur();
     if(field().length===0 && !c.running){ toast("Zet eerst spelers in het veld via \u2699"); return; }
     c.running=!c.running; c.lastTick=Date.now();
-    if(c.running && !c.startedAt) c.startedAt=Date.now();
+    // Bij de aftrap leggen we de opstelling vast als beginpunt van het wisselog.
+    if(c.running && !c.startedAt){ c.startedAt=Date.now(); logStart(); }
     if(c.running) keepAwake();
     save(true); renderFieldBody();
   }
@@ -1926,7 +2036,8 @@
   // dat de tablet sliep of de app op de achtergrond stond. Een kwart telt
   // nooit verder dan de kwartgrens, dus een vergeten klok loopt niet weg.
   function tick(){
-    var c=cur(); if(!c)return;
+    var c=cur(); if(!c){ resetLog(); return; }
+    logEvents();
     if(c.running){
       var now=Date.now(),d=(now-c.lastTick)/1000;c.lastTick=now;
       var cap=(c.qCap||1170), room=cap-(c.qElapsed||0);
