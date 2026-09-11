@@ -535,18 +535,14 @@
     return p.join(" · "); }
   function setGoalScorer(pid){
     var g=goalById(goalEdit); if(!g)return;
-    if(g.scorerId===pid){ g.scorerId=null; g.scorer=""; if(g.team==="tegen")g.own=false; }
+    if(g.scorerId===pid){ g.scorerId=null; g.scorer=""; }
     else { var p=mById(pid); if(!p)return;
-      g.scorerId=pid; g.scorer=p.name;
-      // Een eigen speler bij een tegendoelpunt kan alleen een eigen goal zijn.
-      g.own=(g.team==="tegen");
+      g.scorerId=pid; g.scorer=p.name; g.own=false;
       if(g.assistId===pid){ g.assistId=null; g.assist=""; } }
     save(true); renderMatch(); }
   function setGoalOwn(){ var g=goalById(goalEdit); if(!g)return;
     g.own=!g.own; if(g.own){ g.scorerId=null; g.scorer=""; g.assistId=null; g.assist=""; }
     save(true); renderMatch(); }
-  function setGoalOpp(){ var g=goalById(goalEdit); if(!g)return;
-    g.own=false; g.scorerId=null; g.scorer=""; save(true); renderMatch(); }
   function setGoalAssist(pid){ var g=goalById(goalEdit); if(!g)return;
     if(!pid || g.assistId===pid){ g.assistId=null; g.assist=""; }
     else { var p=mById(pid); if(!p)return; g.assistId=pid; g.assist=p.name; }
@@ -562,7 +558,7 @@
     h+='<div class="gp-h"><span class="gp-t">'+(twoPitch()?esc(pitchName(g.pitch))+' &middot; ':'')+
        (voor?'Doelpunt voor':'Tegendoelpunt')+' &middot; kwart '+g.q+' &middot; '+fmt(g.t)+'</span>'+
        '<button class="mini" data-action="goal-close">Klaar</button></div>';
-    h+='<p class="gp-sub">De stand is al bijgewerkt. Noteer hier wie er scoorde.</p>';
+    h+='<p class="gp-sub">De stand is al bijgewerkt. '+(voor?'Noteer hier wie er scoorde.':'Noteer hier alleen of het uit een strafcorner kwam.')+'</p>';
     if(voor){
       h+='<div class="gp-lbl">WIE SCOORDE</div><div class="gp-row">'+
         field(t).map(function(p){return pb(p,"goal-scorer",!g.own&&g.scorerId===p.id);}).join("")+
@@ -571,11 +567,6 @@
       h+='<div class="gp-lbl">ASSIST</div><div class="gp-row">'+
         lijst.filter(function(p){return p.id!==g.scorerId;}).map(function(p){return pb(p,"goal-assist",g.assistId===p.id);}).join("")+
         '<button class="gp-b neutral'+(!g.assistId?" on":"")+'" data-action="goal-noassist">Geen assist</button></div>';
-    } else {
-      h+='<div class="gp-lbl">WIE SCOORDE</div><div class="gp-row">'+
-        '<button class="gp-b neutral'+(!g.own?" on":"")+'" data-action="goal-opp">Tegenstander</button>'+
-        '<span class="gp-sep">EIGEN GOAL DOOR EEN VAN ONS</span>'+
-        lijst.map(function(p){return pb(p,"goal-scorer",g.own&&g.scorerId===p.id);}).join("")+'</div>';
     }
     h+='<div class="gp-lbl">STRAFCORNER</div><div class="gp-row">'+
       '<button class="gp-b pc'+(g.pc?" on":"")+'" data-action="goal-pc">'+(g.pc?'&#10003; ':'')+'Uit een strafcorner</button></div>';
@@ -1501,7 +1492,6 @@
       case "goal-close": goalEdit=null; renderMatch(); break;
       case "goal-scorer": setGoalScorer(id); break;
       case "goal-own": setGoalOwn(); break;
-      case "goal-opp": setGoalOpp(); break;
       case "goal-assist": setGoalAssist(id); break;
       case "goal-noassist": setGoalAssist(null); break;
       case "goal-pc": toggleGoalPc(); break;
