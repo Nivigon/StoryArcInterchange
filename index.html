@@ -336,7 +336,7 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.3";
+  var VERSION = "0.4";
   var LINES = ["Keeper","Verdediging","Middenveld","Aanval"];
   var POSITIONS = [
     {id:"SPL",x:32,y:13},{id:"SPR",x:68,y:13},
@@ -366,10 +366,12 @@
   // of op de eigen bank, en de klok en de kwarten gelden voor allebei.
   var TEST_PITCHES = [{id:"A",name:"Veld A"},{id:"B",name:"Veld B"}];
   var STINT_FULL = 8 * 60;
-  // Veiligheidsnet: zoveel minuten na de eerste keer Start wordt een
-  // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
-  // is ongeveer 84 minuten, dus hier zit ruimte voor een late start).
-  var MATCH_MAX_MIN = 110;
+  // Veiligheidsnet: bij zoveel minuten GESPEELDE tijd (de wedstrijdklok, niet
+  // de echte klok) wordt een vergeten wedstrijd vanzelf afgerond en opgeslagen.
+  // Pauzes, de rust, een bespreking of een dichtstaande app tellen dus niet
+  // mee. Een volledige wedstrijd is 4 x 20 = 80 minuten, dus 100 minuten
+  // speeltijd zit daar ruim boven en wordt bij normaal spelen nooit geraakt.
+  var MATCH_MAX_MIN = 100;
   var KEY = "wisselapp_v3";
 
   // Vaste Firebase-koppeling: de app synchroniseert standaard naar deze
@@ -767,7 +769,7 @@
     var lbl = opp ? (opp+(newThuis?" (thuis)":" (uit)")) : ("Wedstrijd "+datum());
     state.current = {
       id:"m_"+Date.now(), label:lbl, opponent:opp, thuis:newThuis, format:"11",
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1200, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -867,7 +869,7 @@
     var c=cur(); if(!c)return;
     c.autoFinished=true;
     archiveMatch(c);
-    toast("Wedstrijd na "+MATCH_MAX_MIN+" minuten automatisch afgerond en opgeslagen"); syncNow(false);
+    toast("Wedstrijd na "+MATCH_MAX_MIN+" minuten speeltijd automatisch afgerond en opgeslagen"); syncNow(false);
   }
   function archiveMatch(c){
     c.running=false; c.selectedId=null; c.finished=new Date().toISOString();
@@ -962,7 +964,7 @@
   }
   function renderMatch(){
     var c=cur();
-    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qCap=c.qCap||1170;c.qBeeped=false;}
+    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qCap=c.qCap||1200;c.qBeeped=false;}
     normalizeTeams();
     // Met twee veldjes staat de wisselbank en de stand bij het eigen veld, dus
     // dan blijft de kop leeg op de klok, de kwarten en wie er uit staat na.
@@ -1122,7 +1124,7 @@
     var m = {
       id:"m_"+Date.now(), label:"Test "+naam+(two?" (2 velden)":""), opponent:"", thuis:true, test:true, format:fmt,
       pitches: two ? TEST_PITCHES.map(function(t){return {id:t.id,name:t.name};}) : null,
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1200, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -2040,7 +2042,7 @@
     logEvents();
     if(c.running){
       var now=Date.now(),d=(now-c.lastTick)/1000;c.lastTick=now;
-      var cap=(c.qCap||1170), room=cap-(c.qElapsed||0);
+      var cap=(c.qCap||1200), room=cap-(c.qElapsed||0);
       if(d>room) d=Math.max(0,room);
       var stopNow=false, rerender=false;
       if(d>0){c.elapsed+=d; c.qElapsed=(c.qElapsed||0)+d;
@@ -2055,7 +2057,7 @@
       else save(false);
       if(state.view==="match"){ if(rerender)renderMatch(); else refreshDynamic(); }
     } else { c.lastTick=Date.now(); }
-    if(c.startedAt && Date.now()-c.startedAt >= MATCH_MAX_MIN*60000){ autoFinishMatch(); }
+    if(c.startedAt && (c.elapsed||0) >= MATCH_MAX_MIN*60){ autoFinishMatch(); }
   }
 
   // ---------- boot ----------
@@ -2065,6 +2067,9 @@
   // Bij opstarten de klok niet resetten: als Android de app op de achtergrond
   // heeft afgesloten, telt de tick de tussentijd bij (tot de kwartgrens).
   if(cur() && !cur().lastTick)cur().lastTick=Date.now();
+  // Een wedstrijd die nog met de oude kwartgrens (19:30) openstaat, meteen
+  // ophogen naar 20:00 zodat ook een lopende wedstrijd de nieuwe grens krijgt.
+  if(cur() && cur().qCap===1170)cur().qCap=1200;
   renderView();
   setInterval(tick,500);
   window.addEventListener("online",function(){ syncNow(false); pullPresets(); });

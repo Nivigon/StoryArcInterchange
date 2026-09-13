@@ -3,7 +3,7 @@
 // en haalt op de achtergrond de nieuwste versie op zodat je bij de volgende keer
 // openen met internet automatisch de laatste versie hebt.
 
-var CACHE = 'wisselapp-v1';
+var CACHE = 'wisselapp-v2';
 var ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
