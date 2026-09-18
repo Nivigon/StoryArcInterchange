@@ -166,6 +166,16 @@
     transition:opacity .2s;pointer-events:none;font-size:.95rem;max-width:90%;text-align:center}
   .modalmsg.show{opacity:.95}
   .foot{color:var(--muted);font-size:.75rem;text-align:center;margin-top:10px}
+  .foot .verbtn{border:0;background:transparent;font:inherit;font-weight:800;color:var(--accent);
+    text-decoration:underline;text-underline-offset:2px;padding:6px 4px;cursor:pointer}
+  /* wat is er nieuw */
+  .ver-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .ver-h h3{margin:0}
+  .ver-h .ver-d{color:var(--muted);font-size:.85rem}
+  .ver-h .ver-now{margin-left:auto;background:var(--lime);color:#173a12;border-radius:20px;
+    padding:2px 9px;font-size:.72rem;font-weight:800}
+  .verlist{margin:8px 0 0;padding-left:20px}
+  .verlist li{margin:4px 0;font-size:.95rem}
   /* nieuwe wedstrijd */
   .seg{display:flex;gap:8px;margin-top:8px}
   .seg .pill{flex:1;text-align:center;padding:12px}
@@ -336,7 +346,30 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.3";
+  var VERSION = "0.4";
+  // Overzicht van wat er per versie veranderd is. De nieuwste versie staat
+  // bovenaan en is te zien via het versienummer op het startscherm.
+  var CHANGELOG = [
+    {v:"0.4", datum:"18 september 2026", punten:[
+      "Versienummer op het startscherm; tik erop voor een overzicht van de updates."
+    ]},
+    {v:"0.3", datum:"7 tot 12 september 2026", punten:[
+      "Doelpunt noteren met maker, assist en strafcorner.",
+      "Bij een tegendoelpunt alleen nog de vraag of het een strafcorner was.",
+      "Wisselog met tijdstempels wordt bewaard en getoond bij de wedstrijd.",
+      "Testmodus met twee teams en twee veldjes tegelijk.",
+      "Testmodus met kleine veldopstellingen: 5 tegen 5 en 6 tegen 6.",
+      "App opent full screen zonder statusbalk.",
+      "Klok wordt niet meer gereset bij opnieuw openen van de app.",
+      "Wedstrijdklok betrouwbaar gemaakt; een vergeten wedstrijd wordt automatisch afgerond."
+    ]},
+    {v:"0.2", datum:"7 september 2026", punten:[
+      "Wedstrijdscherm: wissels zonder horizontale scroll en doelpunten weghalen.",
+      "Opstellingen opslaan als preset, gesynchroniseerd via Firebase.",
+      "Afgeronde wedstrijden standaard synchroniseren naar Firebase.",
+      "App online gezet via GitHub Pages."
+    ]}
+  ];
   var LINES = ["Keeper","Verdediging","Middenveld","Aanval"];
   var POSITIONS = [
     {id:"SPL",x:32,y:13},{id:"SPR",x:68,y:13},
@@ -891,6 +924,7 @@
     else if(v==="team") renderTeam();
     else if(v==="history") renderHistory();
     else if(v==="sync") renderSync();
+    else if(v==="versie") renderVersie();
     else if(v==="detail") renderDetail();
     else renderHome();
   }
@@ -905,8 +939,20 @@
     h+='<button class="bigbtn ghost" data-action="open-history"><span>Oude wedstrijden</span><span>'+state.history.length+'</span></button>';
     h+='<button class="bigbtn ghost" data-action="open-team"><span>Team beheren</span><span>'+state.roster.length+'</span></button>';
     h+='<button class="bigbtn ghost" data-action="open-sync"><span>Synchronisatie</span><span>'+(state.sync&&state.sync.mode!=="off"?"aan":"uit")+'</span></button>';
-    h+='<div class="foot">Interchange AMHC v'+VERSION+' &middot; werkt offline &middot; opgeslagen op dit apparaat</div>';
+    h+='<div class="foot"><button class="verbtn" data-action="open-versie">Versie '+VERSION+' &middot; wat is er nieuw?</button><br>Interchange AMHC &middot; werkt offline &middot; opgeslagen op dit apparaat</div>';
     h+='</div>';
+    app.innerHTML=h;
+  }
+
+  function renderVersie(){
+    var h='<div class="screen"><div class="topbar"><h2>Wat is er nieuw</h2>'+
+      '<button class="hbtn" data-action="home">Terug</button></div><div class="body">';
+    CHANGELOG.forEach(function(r){
+      h+='<div class="sec"><div class="ver-h"><h3>Versie '+esc(r.v)+'</h3><span class="ver-d">'+esc(r.datum)+'</span>'+
+         (r.v===VERSION?'<span class="ver-now">huidige versie</span>':'')+'</div>';
+      h+='<ul class="verlist">'+r.punten.map(function(t){return '<li>'+esc(t)+'</li>';}).join("")+'</ul></div>';
+    });
+    h+='</div></div>';
     app.innerHTML=h;
   }
 
@@ -1617,6 +1663,7 @@
       case "open-history": go("history"); break;
       case "open-team": go("team"); break;
       case "open-sync": go("sync"); break;
+      case "open-versie": go("versie"); break;
       case "sync-save": syncSave(); break;
       case "sync-now": syncNow(true); break;
       case "home": grpMode=false; activeGroup=null; rolMode=false; activeRole=null; matchGrp=false; cornerOpen=false; cardOpen=false; scoreOpen=false; goalEdit=null; coachMode=false; warnMuted=false; if(coachTimer){clearTimeout(coachTimer);coachTimer=null;} save(true); go("home"); break;
