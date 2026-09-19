@@ -89,6 +89,8 @@
     padding:0 14px;height:54px;min-width:52px;font-size:1rem;background:rgba(255,255,255,.16)}
   .hbtn.play{background:var(--lime);color:#173a12}
   .hbtn.icon{font-size:1.4rem;padding:0;width:52px}
+  .hbtn.qbtn{background:#fff;color:#0a3d24;white-space:nowrap;line-height:1.1;padding:0 12px}
+  .hbtn.qbtn small{display:block;font-size:.68rem;font-weight:700;color:#3f6b52;letter-spacing:.02em}
   .subline{background:var(--accent);color:#dff3e6;font-size:.85rem;
     padding:0 12px 8px;display:flex;justify-content:space-between;flex-shrink:0}
   main{flex:1;overflow-y:auto;padding:10px 10px 16px;-webkit-overflow-scrolling:touch}
@@ -351,6 +353,7 @@
   // bovenaan en is te zien via het versienummer op het startscherm.
   var CHANGELOG = [
     {v:"0.5", datum:"19 september 2026", punten:[
+      "Grote knop Volgende kwart in de kop van het wedstrijdscherm, altijd te gebruiken (ook terwijl de klok loopt) en altijd met bevestiging. De knop laat zien welk kwart het nu is.",
       "Als een kwart helemaal tot 19:30 is doorgelopen, start de knop Hervat meteen het volgende kwart in plaats van direct weer te stoppen.",
       "Na een afgelopen kwart laat het scherm zien dat het kwart voorbij is en welk kwart je met de knop start."
     ]},
@@ -750,6 +753,12 @@
     if(!confirm(vraag)) return;
     beginQuarter(c,false);
     save(true); renderMatch(); toast("Kwart "+c.quarter); }
+  // De knop Volgende kwart staat altijd in de kop, ook terwijl de klok loopt,
+  // zodat je nooit vastloopt. Hij laat zien welk kwart het nu is; de vraag om
+  // bevestiging in nextQuarter voorkomt dat je per ongeluk doorklikt.
+  function quarterBtnHTML(c){
+    return c.quarter>=4 ? 'Kwart 4<small>laatste kwart</small>' : 'Kwart '+c.quarter+' &rarr; '+(c.quarter+1)+'<small>volgende kwart</small>';
+  }
   // Een kwart is voorbij zodra de klok op de kwartgrens (19:30) staat; dan
   // telt de tick niets meer bij en kan de klok niet meer hervat worden.
   function quarterOver(c){ return (c.qElapsed||0)>=(c.qCap||1170); }
@@ -1028,7 +1037,7 @@
     var h='<div class="screen">';
     h+='<header>'+
        '<div class="hleft"><div id="clock" class="clock">'+fmt(c.qElapsed||0)+'</div>'+
-         '<div class="hmeta"><span class="qpill" data-action="next-quarter">Kwart <span id="qnum">'+c.quarter+'</span> &#9654;</span> <span id="fieldCount"></span> &middot; <span id="stateLbl"></span></div>'+
+         '<div class="hmeta"><span class="hlabel">Kwart '+c.quarter+'</span>&middot; <span id="fieldCount"></span> &middot; <span id="stateLbl"></span></div>'+
          (two?'':scoreBarHTML(""))+
        '</div>'+
        (two?'<div style="flex:1 1 auto"></div>':'<div class="hbench"><div class="tb-h">WISSELS ('+bs.n+')</div><div class="tb-strip" id="benchStrip">'+bs.html+'</div></div>')+
@@ -1037,6 +1046,7 @@
          '<div id="warnpill" class="warnpill" data-action="warn-mute" style="display:none"></div>'+
          '<button class="hbtn corner'+((corner!==null||cornerOpen)?" act":"")+'" data-action="corner-toggle">Strafcorner'+(corner!==null?': '+(corner+1):'')+'</button>'+
          '<button class="hbtn corner'+(matchGrp?" act":"")+'" data-action="mgrp-toggle">'+(matchGrp?"Klaar":"Groepjes")+'</button>'+
+         '<button class="hbtn qbtn" data-action="next-quarter" id="qBtn">'+quarterBtnHTML(c)+'</button>'+
          '<button class="hbtn play" data-action="start-toggle" id="startBtn">Start</button>'+
          '<button class="hbtn icon" data-action="setup-open" aria-label="Opstelling">&#9881;</button>'+
          '<button class="hbtn icon" data-action="home" aria-label="Menu">&#9776;</button>'+
@@ -1113,7 +1123,8 @@
     var appEl=document.getElementById("app"); if(appEl)appEl.classList.toggle("coach",coachMode);
     var clk=document.getElementById("clock");
     if(clk){clk.textContent=fmt(c.qElapsed||0);clk.classList.toggle("paused",!c.running&&(c.qElapsed||0)>0);clk.classList.toggle("over",(c.qElapsed||0)>=(c.qTarget||1050));}
-    var qn=document.getElementById("qnum"); if(qn)qn.textContent=c.quarter;
+    var ql=document.querySelector("#app .hmeta .hlabel"); if(ql)ql.textContent="Kwart "+c.quarter;
+    var qb=document.getElementById("qBtn"); if(qb){ var qh=quarterBtnHTML(c); if(qb.innerHTML!==qh)qb.innerHTML=qh; }
     var fc=document.getElementById("fieldCount"); if(fc)fc.textContent=field().length+" in het veld";
     var fcs=document.querySelectorAll("[data-fc]");
     for(var fi=0;fi<fcs.length;fi++)fcs[fi].textContent=field(fcs[fi].getAttribute("data-fc")).length+" in het veld";
