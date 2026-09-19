@@ -354,10 +354,11 @@
   var CHANGELOG = [
     {v:"0.5", datum:"19 september 2026", punten:[
       "Grote knop Volgende kwart in de kop van het wedstrijdscherm, altijd te gebruiken (ook terwijl de klok loopt) en altijd met bevestiging. De knop laat zien welk kwart het nu is.",
-      "Als een kwart helemaal tot 19:30 is doorgelopen, vraagt Hervat of je naar het volgende kwart wilt (OK) of toch verder telt in dit kwart (Annuleren). De klok loopt in beide gevallen weer.",
-      "Een wedstrijd wordt alleen nog automatisch afgerond als de klok 45 minuten stilstaat, nooit midden in het spel.",
-      "Dubbel tikken op Start of Pauze telt als een tik.",
-      "Klok kan niet meer net onder 19:30 blijven hangen door afrondingsfouten."
+      "De klok is helemaal handmatig: de grens van 19:30 is weg. De klok loopt tot je op Pauze drukt en een kwart eindigt alleen via de knop Volgende kwart.",
+      "Na de streep (17:30) piept de app elke minuut en meldt hij dat de klok nog loopt, zolang je niet op Pauze drukt.",
+      "Een vergeten klok stopt een keer vanzelf na 110 minuten speeltijd; Hervat werkt daarna gewoon.",
+      "Een wedstrijd wordt alleen automatisch afgerond als de klok 45 minuten stilstaat, nooit midden in het spel.",
+      "Dubbel tikken op Start of Pauze telt als een tik."
     ]},
     {v:"0.4", datum:"18 september 2026", punten:[
       "Versienummer op het startscherm; tik erop voor een overzicht van de updates."
@@ -408,14 +409,17 @@
   // of op de eigen bank, en de klok en de kwarten gelden voor allebei.
   var TEST_PITCHES = [{id:"A",name:"Veld A"},{id:"B",name:"Veld B"}];
   var STINT_FULL = 8 * 60;
-  // Veiligheidsnet: zoveel minuten na de eerste keer Start wordt een
-  // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
-  // is ongeveer 84 minuten, dus hier zit ruimte voor een late start).
-  // Dat gebeurt alleen als de klok ook al IDLE_MIN minuten stilstaat, zodat
-  // een wedstrijd die later begon of lang stillag nooit midden in het spel
-  // wordt afgerond.
+  // De klok is helemaal handmatig: hij loopt tot je op Pauze drukt en een
+  // kwart eindigt alleen via de knop Volgende kwart. Na 17:30 (de streep)
+  // piept de app en herinnert hij je elke minuut dat de klok nog loopt.
+  // Er zijn twee veiligheidsnetten die het spel nooit in de weg zitten:
+  // - Na MATCH_MAX_MIN minuten speeltijd (4 x 17,5 is 70) stopt een
+  //   vergeten klok een keer vanzelf; Hervat werkt daarna gewoon weer.
+  // - Een wedstrijd waarvan de klok IDLE_MIN minuten stilstaat en die
+  //   MATCH_MAX_MIN minuten geleden begon, wordt vanzelf afgerond.
   var MATCH_MAX_MIN = 110;
   var IDLE_MIN = 45;
+  var REMIND_SEC = 60;
   var KEY = "wisselapp_v3";
 
   // Vaste Firebase-koppeling: de app synchroniseert standaard naar deze
@@ -757,7 +761,7 @@
       ? "Kwart "+c.quarter+" is nog niet op de streep. Toch naar kwart "+(c.quarter+1)+"? De klok stopt dan."
       : "Kwart "+c.quarter+" afsluiten en naar kwart "+(c.quarter+1)+"? De klok stopt dan.";
     if(!confirm(vraag)) return;
-    beginQuarter(c,false);
+    beginQuarter(c);
     save(true); renderMatch(); toast("Kwart "+c.quarter); }
   // De knop Volgende kwart staat altijd in de kop, ook terwijl de klok loopt,
   // zodat je nooit vastloopt. Hij laat zien welk kwart het nu is; de vraag om
@@ -765,12 +769,9 @@
   function quarterBtnHTML(c){
     return c.quarter>=4 ? 'Kwart 4<small>laatste kwart</small>' : 'Kwart '+c.quarter+' &rarr; '+(c.quarter+1)+'<small>volgende kwart</small>';
   }
-  // Een kwart is voorbij zodra de klok op de kwartgrens (19:30) staat; dan
-  // telt de tick niets meer bij en kan de klok niet meer hervat worden.
-  function quarterOver(c){ return (c.qElapsed||0)>=(c.qCap||1170)-0.01; }
-  // Naar het volgende kwart: klok op nul, en meteen laten lopen als dat gevraagd is.
-  function beginQuarter(c,run){
-    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.running=!!run; c.lastTick=Date.now(); if(run)c.lastRunAt=Date.now();
+  // Naar het volgende kwart: klok op nul en stil, tot je op Start drukt.
+  function beginQuarter(c){
+    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.qRemind=0; c.running=false; c.lastTick=Date.now();
     if(c.startedAt)logQuarter();
   }
   var coachMode=false, coachTimer=null;
@@ -826,7 +827,7 @@
     var lbl = opp ? (opp+(newThuis?" (thuis)":" (uit)")) : ("Wedstrijd "+datum());
     state.current = {
       id:"m_"+Date.now(), label:lbl, opponent:opp, thuis:newThuis, format:"11",
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -1034,7 +1035,7 @@
   }
   function renderMatch(){
     var c=cur();
-    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qCap=c.qCap||1170;c.qBeeped=false;}
+    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qBeeped=false;}
     normalizeTeams();
     // Met twee veldjes staat de wisselbank en de stand bij het eigen veld, dus
     // dan blijft de kop leeg op de klok, de kwarten en wie er uit staat na.
@@ -1134,12 +1135,9 @@
     var fc=document.getElementById("fieldCount"); if(fc)fc.textContent=field().length+" in het veld";
     var fcs=document.querySelectorAll("[data-fc]");
     for(var fi=0;fi<fcs.length;fi++)fcs[fi].textContent=field(fcs[fi].getAttribute("data-fc")).length+" in het veld";
-    // Op de kwartgrens is Hervat zinloos (de klok stopt dan meteen weer), dus
-    // dan zegt de knop welk kwart hij start, en bij het laatste kwart dat het klaar is.
-    var over=!c.running&&quarterOver(c);
-    var sl=document.getElementById("stateLbl"); if(sl)sl.textContent=c.running?"Loopt":(over?"Kwart "+c.quarter+" afgelopen":(c.elapsed>0?"Gepauzeerd":"Klaar om te starten"));
+    var sl=document.getElementById("stateLbl"); if(sl)sl.textContent=c.running?"Loopt":(c.elapsed>0?"Gepauzeerd":"Klaar om te starten");
     var sb=document.getElementById("startBtn");
-    if(sb){sb.textContent=c.running?"Pauze":(over?"Hervat\u2026":(c.elapsed>0?"Hervat":"Start"));sb.classList.toggle("play",!c.running);}
+    if(sb){sb.textContent=c.running?"Pauze":(c.elapsed>0?"Hervat":"Start");sb.classList.toggle("play",!c.running);}
     // Aangever en stopper worden per veldje bekeken: elk team heeft ze nodig.
     var w=[];
     pitches().forEach(function(t){
@@ -1199,7 +1197,7 @@
     var m = {
       id:"m_"+Date.now(), label:"Test "+naam+(two?" (2 velden)":""), opponent:"", thuis:true, test:true, format:fmt,
       pitches: two ? TEST_PITCHES.map(function(t){return {id:t.id,name:t.name};}) : null,
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -1817,28 +1815,6 @@
     // Twee tikken vlak na elkaar (dubbeltik, trillende vinger) tellen als een.
     var nowTap=Date.now(); if(nowTap-lastStartTap<600)return; lastStartTap=nowTap;
     if(field().length===0 && !c.running){ toast("Zet eerst spelers in het veld via \u2699"); return; }
-    // Is de klok tot de kwartgrens doorgelopen (bijvoorbeeld omdat er in de
-    // pauze niet op Pauze is gedrukt), dan zou hervatten meteen weer stoppen.
-    // Dan gaat de knop direct door naar het volgende kwart en start de klok.
-    // OK gaat naar het volgende kwart en start de klok; Annuleren telt
-    // gewoon verder in dit kwart (bijvoorbeeld bij een blessure), met vijf
-    // minuten extra ruimte. Zo is er in beide gevallen een weg vooruit.
-    if(!c.running && quarterOver(c)){
-      var kw=c.quarter;
-      if(kw>=4){
-        if(!confirm("Kwart 4 staat op "+fmt(c.qCap||1170)+" en is afgelopen.\n\nOK: de klok telt toch verder in kwart 4.\nAnnuleren: niets doen (rond daarna de wedstrijd af).")) return;
-        c.qCap=(c.qCap||1170)+300; c.running=true; c.lastTick=Date.now(); c.lastRunAt=Date.now(); keepAwake();
-        save(true); renderMatch(); toast("Klok telt verder in kwart 4"); return;
-      }
-      if(confirm("Kwart "+kw+" staat op "+fmt(c.qCap||1170)+" en is afgelopen.\n\nOK: naar kwart "+(kw+1)+" en de klok starten.\nAnnuleren: de klok telt toch verder in kwart "+kw+".")){
-        beginQuarter(c,true); keepAwake();
-        save(true); renderMatch(); toast("Kwart "+c.quarter+" gestart");
-      } else {
-        c.qCap=(c.qCap||1170)+300; c.running=true; c.lastTick=Date.now(); c.lastRunAt=Date.now(); keepAwake();
-        save(true); renderMatch(); toast("Klok telt verder in kwart "+kw);
-      }
-      return;
-    }
     c.running=!c.running; c.lastTick=Date.now(); if(c.running)c.lastRunAt=Date.now();
     // Bij de aftrap leggen we de opstelling vast als beginpunt van het wisselog.
     if(c.running && !c.startedAt){ c.startedAt=Date.now(); logStart(); }
@@ -2136,28 +2112,29 @@
 
   // ---------- tick ----------
   // De klok loopt door in elk scherm (ook in Opstelling) en telt ook de tijd
-  // dat de tablet sliep of de app op de achtergrond stond. Een kwart telt
-  // nooit verder dan de kwartgrens, dus een vergeten klok loopt niet weg.
+  // dat de tablet sliep of de app op de achtergrond stond. Hij stopt alleen
+  // als je op Pauze drukt; na de streep (17:30) herinnert de app je daaraan.
   function tick(){
     var c=cur(); if(!c){ resetLog(); return; }
     logEvents();
     if(c.running){
       var now=Date.now(),d=(now-c.lastTick)/1000;c.lastTick=now;c.lastRunAt=now;
-      var cap=(c.qCap||1170), room=cap-(c.qElapsed||0);
-      if(d>room) d=Math.max(0,room);
       var stopNow=false, rerender=false;
       if(d>0){c.elapsed+=d; c.qElapsed=(c.qElapsed||0)+d;
-        // Vlak onder de grens op de grens zetten, anders blijft de klok door
-        // afrondingsfouten eeuwig een fractie onder 19:30 hangen.
-        if(cap-c.qElapsed<0.01){ c.elapsed+=cap-c.qElapsed; c.qElapsed=cap; }
         var f=field();for(var i=0;i<f.length;i++){f[i].total+=d;f[i].stint+=d;}
         var off=c.players.filter(function(p){return !p.pos;});for(var j=0;j<off.length;j++){off[j].benchStint=(off[j].benchStint||0)+d;}
-        if(!c.qBeeped && c.qElapsed>=(c.qTarget||1050)){ c.qBeeped=true; beep(); toast("Kwart "+c.quarter+" op de streep"); }
+        var target=(c.qTarget||1050);
+        if(!c.qBeeped && c.qElapsed>=target){ c.qBeeped=true; c.qRemind=0; beep(); toast("Kwart "+c.quarter+" op de streep"); }
+        // Elke minuut na de streep: piep en melding, zolang de klok nog loopt.
+        else if(c.qElapsed>=target){ var past=Math.floor((c.qElapsed-target)/REMIND_SEC);
+          if(past>(c.qRemind||0)){ c.qRemind=past; beep(); toast("Kwart "+c.quarter+" loopt nog ("+fmt(c.qElapsed)+"). Vergeet Pauze niet."); } }
         var cd=c.players.filter(function(p){return p.card && p.card.type!=="rood" && p.card.secsLeft>0;});
         for(var m2=0;m2<cd.length;m2++){ cd[m2].card.secsLeft-=d; if(cd[m2].card.secsLeft<=0){ cd[m2].card=null; cd[m2].present=true; rerender=true; beep(); toast(cd[m2].name+" mag terug"); } }
       }
-      if((c.qElapsed||0)>=cap){ stopNow=true; }
-      if(stopNow){ c.running=false; beep(); toast("Kwart "+c.quarter+" op "+fmt(cap)+": klok gestopt"); save(true); }
+      // Noodstop, een keer per wedstrijd: meer dan MATCH_MAX_MIN minuten
+      // speeltijd is nooit echt, dus dan is de klok vergeten. Hervat werkt daarna gewoon.
+      if(!c.longStopped && c.elapsed>=MATCH_MAX_MIN*60){ stopNow=true; c.longStopped=true; }
+      if(stopNow){ c.running=false; beep(); toast("Klok gestopt: al "+MATCH_MAX_MIN+" minuten speeltijd. Hervat als dat echt zo is."); save(true); }
       else save(false);
       if(state.view==="match"){ if(rerender)renderMatch(); else refreshDynamic(); }
     } else { c.lastTick=Date.now(); }
