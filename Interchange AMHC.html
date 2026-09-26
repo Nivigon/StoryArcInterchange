@@ -354,10 +354,13 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.5";
+  var VERSION = "0.6";
   // Overzicht van wat er per versie veranderd is. De nieuwste versie staat
   // bovenaan en is te zien via het versienummer op het startscherm.
   var CHANGELOG = [
+    {v:"0.6", datum:"26 september 2026", punten:[
+      "Spelers in een groepje krijgen een rand in de kleur van hun groepje, op het veld, op de bank en bij de opstelling."
+    ]},
     {v:"0.5", datum:"26 september 2026", punten:[
       "De klok stopt niet meer vanzelf aan het eind van een kwart; je zet hem zelf stil met Pauze.",
       "Knop Start kwart onderin, met een bevestiging zodat een verkeerde tik niets doet.",
@@ -892,6 +895,9 @@
   function playerGroups(pid){return ((cur()&&cur().groups)||[]).filter(function(g){return g.members.indexOf(pid)>=0;});}
   function groupDots(pid){var gs=playerGroups(pid);if(!gs.length)return "";
     return '<span class="gdots">'+gs.map(function(g){return '<span class="gdot" style="background:'+g.color+'"></span>';}).join("")+'</span>';}
+  // Rand in de kleur van het groepje, zodat je in een oogopslag ziet wie bij elkaar hoort.
+  function groupBorder(p){var gs=playerGroups(p.id);if(!gs.length)return "";
+    return 'border:3px solid '+gs[0].color+';'+(p.guest?'box-shadow:inset 0 0 0 2px var(--lime),0 1px 3px rgba(0,0,0,.25);':'');}
   function nextColor(){var used=((cur().groups)||[]).map(function(g){return g.color;});
     for(var i=0;i<GROUPCOLORS.length;i++)if(used.indexOf(GROUPCOLORS[i])<0)return GROUPCOLORS[i];
     return GROUPCOLORS[((cur().groups||[]).length)%GROUPCOLORS.length];}
@@ -1080,7 +1086,7 @@
     var c=cur(); var b=bench(t); b.sort(function(a,b2){return a.total-b2.total;});
     if(!b.length)return {n:0,html:'<span class="tb-empty">Geen wissels</span>'};
     var html=b.map(function(p){var cls="chip mbench"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-in";
-      return '<div class="'+cls+'" style="'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+'<span class="mn">'+esc(p.name)+'</span><span class="mt">bank '+fmt(p.benchStint||0)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';}).join("");
+      return '<div class="'+cls+'" style="'+groupBorder(p)+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+'<span class="mn">'+esc(p.name)+'</span><span class="mt">bank '+fmt(p.benchStint||0)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';}).join("");
     return {n:b.length,html:html};
   }
   function uitStripInner(){
@@ -1171,7 +1177,7 @@
         var p=placed[pos.id];
         if(p){
           var cls="chip on mfield"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-out";
-          dots+='<div class="'+cls+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
+          dots+='<div class="'+cls+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+groupBorder(p)+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
             '<span class="mn">'+esc(p.name)+'</span><span class="mt">'+fmt(p.stint)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';
         } else {
           dots+='<div class="dot open" style="left:'+pos.x+'%;top:'+pos.y+'%" data-emptypos="'+pos.id+'" data-team="'+tm+'"></div>';
@@ -1361,14 +1367,14 @@
       if(rolMode && activeRole && p[activeRole]) return 'outline:3px solid '+ROLE_COLORS[activeRole]+';outline-offset:1px;';
       return '';
     }
-    function chipHTML(p){ return '<div class="chip'+(p.guest?" guest":"")+'" style="'+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+    function chipHTML(p){ return '<div class="chip'+(p.guest?" guest":"")+'" style="'+groupBorder(p)+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
     // Een veldje met zijn eigen plekken. Bij een gewone wedstrijd is dat er maar een.
     function pitchHTML(tm){
       var placed={}; c.players.forEach(function(p){ if(p.pos && teamOf(p)===tm)placed[p.pos]=p; });
       var dots="";
       positions().forEach(function(pos){
         var p=placed[pos.id], tgt=posTarget(tm,pos.id);
-        if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+actOutline(p)+'" data-drop="'+tgt+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+        if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+groupBorder(p)+actOutline(p)+'" data-drop="'+tgt+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
         else { dots+='<div class="dot" style="left:'+pos.x+'%;top:'+pos.y+'%" data-drop="'+tgt+'"></div>'; }
       });
       return '<div class="pitch" data-pitch="'+tm+'">'+pitchSVG()+dots+'</div>';
@@ -1458,7 +1464,7 @@
     return '<div class="legend"><div class="rl-h">LEGENDA</div>'+
       '<div class="lg-ex"><span class="lgchip long">naam</span><span class="lg-txt"><b>staat het langst in de groep</b> &middot; deze wissel je als eerste</span></div>'+
       '<div class="lg-ex"><span class="lgchip">naam</span><span class="lg-txt">net in het veld</span></div>'+
-      '<div class="lg-ex"><span class="gdot lg-dot" style="background:#2b6cff"></span><span class="lg-txt">zelfde gekleurde stip = zelfde wisselgroep</span></div>'+
+      '<div class="lg-ex"><span class="lgchip" style="position:relative;border:3px solid #2b6cff"><span class="gdots"><span class="gdot" style="background:#2b6cff"></span></span>naam</span><span class="lg-txt">zelfde gekleurde rand en stip = zelfde wisselgroep</span></div>'+
       '</div>';
   }
   function cornerBox(){
