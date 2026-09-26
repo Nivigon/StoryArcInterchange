@@ -362,7 +362,7 @@
   var CHANGELOG = [
     {v:"0.6", datum:"26 september 2026", punten:[
       "Spelers in een groepje krijgen de kleur van hun groepje, op het veld, op de bank en bij de opstelling.",
-      "Tijdens de wedstrijd wordt die kleur op het veld donkerder naarmate iemand langer staat."
+      "Tijdens de wedstrijd krijgt wie in een groepje het langst staat een donkere tint van de groepskleur."
     ]},
     {v:"0.5", datum:"26 september 2026", punten:[
       "De klok stopt niet meer vanzelf aan het eind van een kwart; je zet hem zelf stil met Pauze.",
@@ -494,8 +494,8 @@
   var POSGRP={SPL:"spits",SPR:"spits",LS:"spits",MZL:"mz",MZR:"mz",VML:"vm",VMR:"vm",VL:"achter",VC:"achter",VR:"achter",K:"keeper",
     AAL:"spits",AAR:"spits",MID:"mz",VDL:"achter",VDC:"achter",VDR:"achter"};
   function rankShade(t,color){t=Math.max(0,Math.min(1,t));var a=[255,255,255],b=[31,41,55];
-    // Spelers in een groepje lopen van een lichte naar een donkere tint van hun groepskleur.
-    if(color){var c=hexRgb(color);a=mixRgb(c,[255,255,255],0.6);b=mixRgb(c,[0,0,0],0.55);}
+    // Spelers in een groepje houden hun groepskleur; alleen wie het langst staat krijgt een donkere tint.
+    if(color){var c=hexRgb(color);a=c;b=mixRgb(c,[0,0,0],0.55);t=t>=1?1:0;}
     var rgb=mixRgb(a,b,t);
     return {bg:"rgb("+rgb.join(",")+")",ink:inkFor(rgb)};}
   function hexRgb(h){h=h.replace("#","");return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
@@ -1474,7 +1474,7 @@
     return '<div class="legend"><div class="rl-h">LEGENDA</div>'+
       '<div class="lg-ex"><span class="lgchip long">naam</span><span class="lg-txt"><b>staat het langst in de groep</b> &middot; deze wissel je als eerste</span></div>'+
       '<div class="lg-ex"><span class="lgchip">naam</span><span class="lg-txt">net in het veld</span></div>'+
-      '<div class="lg-ex"><span class="lgchip" style="position:relative;background:#2b6cff;color:#fff"><span class="gdots"><span class="gdot" style="background:#2b6cff"></span></span>naam</span><span class="lg-txt">zelfde kleur = zelfde wisselgroep &middot; hoe donkerder, hoe langer in het veld</span></div>'+
+      '<div class="lg-ex"><span class="lgchip" style="position:relative;background:#2b6cff;color:#fff"><span class="gdots"><span class="gdot" style="background:#2b6cff"></span></span>naam</span><span class="lg-txt">zelfde kleur = zelfde wisselgroep &middot; donkere tint = staat het langst</span></div>'+
       '</div>';
   }
   function cornerBox(){
