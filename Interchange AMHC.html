@@ -55,6 +55,14 @@
   .hmeta .hlabel{font-weight:800;color:#fff;margin-right:8px}
   .qpill{display:inline-block;background:rgba(255,255,255,.16);color:#fff;font-weight:800;padding:2px 9px;border-radius:20px;font-size:.8rem;margin-right:4px;cursor:pointer}
   .clock.over{color:#ffcc00}
+  /* Een gepauzeerde klok knippert zacht, zodat per ongeluk pauzeren opvalt. */
+  .clock.paused{animation:clockblink 1.4s ease-in-out infinite}
+  @keyframes clockblink{0%,100%{opacity:.55}50%{opacity:.2}}
+  @media (prefers-reduced-motion:reduce){ .clock.paused{animation:none} }
+  .footbar .qnext{background:#fff;color:var(--accent);border:2px solid var(--accent)}
+  .footbar .qnext.due{background:var(--lime);color:#173a12;border-color:#9bb000}
+  .qp-b{display:block;width:100%;margin-top:8px;text-align:left;line-height:1.25}
+  .qp-b small{display:block;font-weight:600;font-size:.82rem;opacity:.85;margin-top:2px}
   .scorebar{display:flex;align-items:center;gap:8px;margin-top:5px}
   .scgrp{display:flex;align-items:center;gap:5px}
   .scdash{color:#cfe9d8;font-weight:800;font-size:1.05rem}
@@ -346,10 +354,19 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.4";
+  var VERSION = "0.5";
   // Overzicht van wat er per versie veranderd is. De nieuwste versie staat
   // bovenaan en is te zien via het versienummer op het startscherm.
   var CHANGELOG = [
+    {v:"0.5", datum:"26 september 2026", punten:[
+      "De klok stopt niet meer vanzelf aan het eind van een kwart; je zet hem zelf stil met Pauze.",
+      "Knop Start kwart onderin, met een bevestiging zodat een verkeerde tik niets doet.",
+      "Vergeten te stoppen? Bij het starten van het volgende kwart of het afronden kies je of de extra tijd meetelt.",
+      "Herinneringspiep elke 2 minuten zolang een kwart over tijd doorloopt.",
+      "Was de app lang weg (tablet uit, app afgesloten), dan telt de tijd niet verder dan het eind van het kwart.",
+      "Een gepauzeerde klok knippert, zodat per ongeluk pauzeren opvalt.",
+      "Waarschuwing als opslaan op de tablet niet lukt."
+    ]},
     {v:"0.4", datum:"18 september 2026", punten:[
       "Versienummer op het startscherm; tik erop voor een overzicht van de updates."
     ]},
@@ -403,6 +420,14 @@
   // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
   // is ongeveer 84 minuten, dus hier zit ruimte voor een late start).
   var MATCH_MAX_MIN = 110;
+  // Harde grens voor als de wedstrijd niet in kwart 4 is afgelopen of niet
+  // stilstaat: dan pas na zoveel minuten automatisch afronden.
+  var MATCH_HARD_MIN = 180;
+  // Loopt een kwart over tijd door, dan piept de app elke zoveel seconden.
+  var OVER_WARN_SEC = 120;
+  // Heeft de app langer dan dit niet getikt (tablet uit, app afgesloten), dan
+  // tellen we de gemiste tijd hooguit tot het eind van het kwart.
+  var GAP_SEC = 300;
   var KEY = "wisselapp_v3";
 
   // Vaste Firebase-koppeling: de app synchroniseert standaard naar deze
@@ -431,10 +456,14 @@
   }
   function migrateOrFresh(old){ return fresh(); }
 
-  function load(){ try{var r=localStorage.getItem(KEY);return r?JSON.parse(r):null;}catch(e){return null;} }
-  var saveT=0;
+  // Kan de opgeslagen data niet gelezen worden, dan bewaren we die eerst onder
+  // een aparte sleutel, zodat een nieuwe lege start niet alles overschrijft.
+  function load(){ var r=null; try{ r=localStorage.getItem(KEY); return r?JSON.parse(r):null; }
+    catch(e){ try{ if(r)localStorage.setItem(KEY+"_kapot_"+Date.now(),r); }catch(e2){} return null; } }
+  var saveT=0, saveFailT=0;
   function save(now){ var t=Date.now(); if(!now&&t-saveT<800)return; saveT=t;
-    try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){} }
+    try{localStorage.setItem(KEY,JSON.stringify(state));}
+    catch(e){ if(t-saveFailT>20000){ saveFailT=t; try{ toast("Let op: opslaan op de tablet lukt niet. Maak een back-up."); }catch(e2){} } } }
 
   // ---------- utils ----------
   function fmt(sec){sec=Math.floor(sec);var m=Math.floor(sec/60),s=sec%60;return (m<10?"0":"")+m+":"+(s<10?"0":"")+s;}
@@ -738,15 +767,88 @@
       if(p.card && p.card.type!=="rood"){ p.card.secsLeft-=delta; if(p.card.secsLeft<=0){ p.card=null; p.present=true; } }
     });
     c.players=s.players; c.selectedId=null; save(true); renderMatch(); toast("Teruggedraaid"); }
+  // ---------- kwarten ----------
+  // De klok stopt niet vanzelf. Je zet hem stil met Pauze en start het
+  // volgende kwart met de knop onderin; die vraagt eerst om bevestiging.
+  // Op het moment dat een kwart de streep haalt, leggen we vast hoeveel tijd
+  // iedereen had. Liep de klok daarna door omdat niemand stopte, dan kun je de
+  // extra tijd weer weghalen alsof het kwart op de streep eindigde.
+  var qModal=null; // null, "next" of "finish"
+  function qTargetOf(c){ return c.qTarget||1050; }
+  function snapQuarter(c){
+    var tot={}, cards={};
+    c.players.forEach(function(p){ tot[p.id]=p.total||0;
+      if(p.card && p.card.type!=="rood" && p.card.secsLeft>0)cards[p.id]={type:p.card.type,secsLeft:p.card.secsLeft}; });
+    return {elapsed:c.elapsed||0, tot:tot, cards:cards};
+  }
+  function overSecs(c){ return Math.max(0,(c.qElapsed||0)-qTargetOf(c)); }
+  function canTrim(c){ return !!(c && c.qSnap && overSecs(c)>10); }
+  // Zet het huidige kwart terug naar de streep. Speeltijd, bank- en veldtijd,
+  // kaarttijd, het wisselog en doelpunten van na de streep schuiven mee.
+  function trimQuarter(c){
+    if(!canTrim(c))return 0;
+    var extra=overSecs(c), snap=c.qSnap, cut=Math.round(snap.elapsed), target=qTargetOf(c);
+    c.players.forEach(function(p){
+      var gain=Math.min(extra,Math.max(0,(p.total||0)-(snap.tot[p.id]||0)));
+      p.total=Math.max(0,(p.total||0)-gain);
+      p.stint=Math.max(0,(p.stint||0)-extra);
+      p.benchStint=Math.max(0,(p.benchStint||0)-extra);
+      var sc=snap.cards[p.id];
+      if(p.card && p.card.type!=="rood"){
+        if(sc && sc.type===p.card.type) p.card.secsLeft=sc.secsLeft;
+        else if(p.card.len) p.card.secsLeft=p.card.len;
+      } else if(!p.card && sc && p.present && !p.pos){
+        // Kaart liep af in de extra tijd en de speler zit nog op de bank.
+        p.card={type:sc.type,secsLeft:sc.secsLeft}; p.present=false;
+      }
+    });
+    (c.log||[]).forEach(function(e){ if(e.q===c.quarter && e.t>cut){ e.t=cut; if(e.qt>target)e.qt=target; } });
+    (c.goals||[]).forEach(function(g){ if(g.q===c.quarter && g.t>cut)g.t=cut; });
+    c.elapsed=snap.elapsed; c.qElapsed=target;
+    undoStack=[]; lastPos=snapPos();
+    return extra;
+  }
   function nextQuarter(){ var c=cur(); if(!c)return;
-    if(c.quarter>=4){ toast("Laatste kwart"); return; }
-    var vraag = c.qElapsed < (c.qTarget||1050)
-      ? "Kwart "+c.quarter+" is nog niet op de streep. Toch naar kwart "+(c.quarter+1)+"? De klok stopt dan."
-      : "Kwart "+c.quarter+" afsluiten en naar kwart "+(c.quarter+1)+"? De klok stopt dan.";
-    if(!confirm(vraag)) return;
-    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.running=false; c.lastTick=Date.now();
-    if(c.startedAt)logQuarter();
-    save(true); renderMatch(); toast("Kwart "+c.quarter); }
+    if(c.quarter>=4){ toast("Dit is het laatste kwart"); return; }
+    if(!c.startedAt){ toast("De wedstrijd is nog niet begonnen"); return; }
+    qModal="next"; renderMatch(); }
+  function startNextQuarter(trim){ var c=cur(); qModal=null; if(!c||c.quarter>=4){ renderMatch(); return; }
+    if(field().length===0){ toast("Zet eerst spelers in het veld via \u2699"); renderMatch(); return; }
+    var weg=trim?trimQuarter(c):0;
+    c.quarter++; c.qElapsed=0; c.qBeeped=false; c.qSnap=null; c.qNextWarn=null;
+    c.running=true; c.lastTick=Date.now();
+    logQuarter(); keepAwake();
+    save(true); renderMatch();
+    toast("Kwart "+c.quarter+" loopt"+(weg?" \u00b7 "+fmt(weg)+" extra tijd weggehaald":"")); }
+  function quarterPanel(){
+    if(!qModal)return "";
+    var c=cur(), q=c.quarter, target=qTargetOf(c), trim=canTrim(c), h;
+    h='<div class="gpwrap" data-action="q-cancel"><div class="goalpanel" data-action="goal-noop">';
+    if(qModal==="next"){
+      h+='<div class="gp-h"><span class="gp-t">Kwart '+(q+1)+' starten?</span></div>';
+      h+='<p class="gp-sub">Kwart '+q+' staat op '+fmt(c.qElapsed||0)+(c.running?' en de klok loopt nog':'')+'. '+
+         'De klok van kwart '+(q+1)+' begint meteen te lopen.</p>';
+      if(trim){
+        h+='<p class="gp-sub"><b>Kwart '+q+' liep '+fmt(overSecs(c))+' over de '+fmt(target)+'.</b> Vergeten te stoppen? Kies hoe lang kwart '+q+' telt.</p>';
+        h+='<button class="btn qp-b" data-action="q-next" data-id="trim">Start kwart '+(q+1)+'<small>kwart '+q+' telt tot '+fmt(target)+', extra tijd eraf</small></button>';
+        h+='<button class="btn light qp-b" data-action="q-next" data-id="keep">Start kwart '+(q+1)+'<small>kwart '+q+' telt tot '+fmt(c.qElapsed||0)+', niets eraf</small></button>';
+      } else {
+        h+='<button class="btn qp-b" data-action="q-next" data-id="keep">Ja, start kwart '+(q+1)+'</button>';
+      }
+    } else {
+      h+='<div class="gp-h"><span class="gp-t">Wedstrijd afronden?</span></div>';
+      h+='<p class="gp-sub">De wedstrijd wordt opgeslagen bij oude wedstrijden. Daarna kun je niets meer wisselen.</p>';
+      if(trim){
+        h+='<p class="gp-sub"><b>Kwart '+q+' liep '+fmt(overSecs(c))+' over de '+fmt(target)+'.</b> Vergeten te stoppen? Kies hoe lang kwart '+q+' telt.</p>';
+        h+='<button class="btn qp-b" data-action="q-finish" data-id="trim">Afronden<small>kwart '+q+' telt tot '+fmt(target)+', extra tijd eraf</small></button>';
+        h+='<button class="btn light qp-b" data-action="q-finish" data-id="keep">Afronden<small>kwart '+q+' telt tot '+fmt(c.qElapsed||0)+', niets eraf</small></button>';
+      } else {
+        h+='<button class="btn qp-b" data-action="q-finish" data-id="keep">Ja, afronden en opslaan</button>';
+      }
+    }
+    h+='<button class="btn light qp-b" data-action="q-cancel" style="text-align:center">Annuleren</button>';
+    return h+'</div></div>';
+  }
   var coachMode=false, coachTimer=null;
   var audioCtx=null, prevMissing=false, lastBeep=0, warnMuted=false;
   function unlockAudio(){ try{ if(!audioCtx){var AC=window.AudioContext||window.webkitAudioContext; if(AC)audioCtx=new AC();} if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume(); }catch(e){} }
@@ -800,7 +902,7 @@
     var lbl = opp ? (opp+(newThuis?" (thuis)":" (uit)")) : ("Wedstrijd "+datum());
     state.current = {
       id:"m_"+Date.now(), label:lbl, opponent:opp, thuis:newThuis, format:"11",
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:(DEFAULT_LINEUP[r.name]||null),total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -892,19 +994,26 @@
   function commitLineup(){ var c=cur(); if(!c)return; c.players.forEach(function(p){ p.onField=!!p.pos; }); grpMode=false; activeGroup=null; rolMode=false; activeRole=null; }
   function finishMatch(){
     var c=cur(); if(!c)return;
-    if(!confirm("Wedstrijd afronden en opslaan bij oude wedstrijden?")) return;
+    qModal="finish"; renderMatch();
+  }
+  function doFinish(trim){
+    var c=cur(); qModal=null; if(!c)return;
+    if(trim)trimQuarter(c);
     archiveMatch(c);
     toast("Wedstrijd opgeslagen"); syncNow(false);
   }
   function autoFinishMatch(){
     var c=cur(); if(!c)return;
+    // Liep de klok in het laatste kwart nog, dan is stoppen vergeten: we
+    // tellen dat kwart dan tot de streep.
+    if(c.running && c.quarter>=4)trimQuarter(c);
     c.autoFinished=true;
     archiveMatch(c);
     toast("Wedstrijd na "+MATCH_MAX_MIN+" minuten automatisch afgerond en opgeslagen"); syncNow(false);
   }
   function archiveMatch(c){
     c.running=false; c.selectedId=null; c.finished=new Date().toISOString();
-    matchGrp=false; activeGroup=null; coachMode=false; warnMuted=false; goalEdit=null;
+    matchGrp=false; activeGroup=null; coachMode=false; warnMuted=false; goalEdit=null; qModal=null;
     state.history.unshift(JSON.parse(JSON.stringify(c)));
     queueMatch(c.id);
     undoStack=[]; resetLog(); releaseWake();
@@ -987,9 +1096,9 @@
     pushUndo();
     var wasField=!!p.pos;
     p.pos=null; p.present=false; p.stint=0; if(wasField)p.benchStint=0;
-    if(kind==="groen") p.card={type:"groen",secsLeft:120};
-    else if(kind==="geel5") p.card={type:"geel",secsLeft:300};
-    else if(kind==="geel10") p.card={type:"geel",secsLeft:600};
+    if(kind==="groen") p.card={type:"groen",secsLeft:120,len:120};
+    else if(kind==="geel5") p.card={type:"geel",secsLeft:300,len:300};
+    else if(kind==="geel10") p.card={type:"geel",secsLeft:600,len:600};
     else p.card={type:"rood",secsLeft:0};
     c.selectedId=null; cardOpen=false; save(true); renderMatch();
     toast(p.name+" "+p.card.type+(p.card.type!=="rood"?" "+fmt(p.card.secsLeft):"")+", plek is vrij");
@@ -1008,7 +1117,7 @@
   }
   function renderMatch(){
     var c=cur();
-    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qCap=c.qCap||1170;c.qBeeped=false;}
+    if(c.quarter==null){c.quarter=1;c.qElapsed=c.qElapsed||0;c.qTarget=c.qTarget||1050;c.qBeeped=false;}
     normalizeTeams();
     // Met twee veldjes staat de wisselbank en de stand bij het eigen veld, dus
     // dan blijft de kop leeg op de klok, de kwarten en wie er uit staat na.
@@ -1031,7 +1140,9 @@
          '<button class="hbtn icon" data-action="home" aria-label="Menu">&#9776;</button>'+
        '</div></header>';
     h+='<main id="matchMain" style="padding:0;display:flex;flex-direction:column"></main>';
-    h+='<div class="footbar"><button class="coachbtn" data-action="coach">coach</button><button class="coachbtn undo" data-action="undo">&#8630; Terug</button><button class="coachbtn kaart" data-action="card-open">Kaart</button><button class="btn light" data-action="finish">Wedstrijd afronden</button></div>';
+    h+='<div class="footbar"><button class="coachbtn" data-action="coach">coach</button><button class="coachbtn undo" data-action="undo">&#8630; Terug</button><button class="coachbtn kaart" data-action="card-open">Kaart</button>'+
+       '<button class="btn qnext" data-action="next-quarter" id="qNextBtn" style="display:none"></button>'+
+       '<button class="btn light" data-action="finish">Wedstrijd afronden</button></div>';
     h+='</div>';
     app.innerHTML=h;
     renderFieldBody();
@@ -1082,7 +1193,7 @@
         '<div class="side">'+sideHtml+'</div>'+
         '</div></div>';
     }
-    main.innerHTML=body+cornerPanel()+cardPanel()+scorePanel()+goalPanel();
+    main.innerHTML=body+cornerPanel()+cardPanel()+scorePanel()+goalPanel()+quarterPanel();
     if(!matchGrp) attachMatchDrag();
     refreshDynamic();
   }
@@ -1106,7 +1217,12 @@
     var fc=document.getElementById("fieldCount"); if(fc)fc.textContent=field().length+" in het veld";
     var fcs=document.querySelectorAll("[data-fc]");
     for(var fi=0;fi<fcs.length;fi++)fcs[fi].textContent=field(fcs[fi].getAttribute("data-fc")).length+" in het veld";
-    var sl=document.getElementById("stateLbl"); if(sl)sl.textContent=c.running?"Loopt":(c.elapsed>0?"Gepauzeerd":"Klaar om te starten");
+    var over=overSecs(c);
+    var sl=document.getElementById("stateLbl"); if(sl)sl.textContent=(c.running?"Loopt":(c.elapsed>0?"Gepauzeerd":"Klaar om te starten"))+(over>=1?" \u00b7 "+fmt(over)+" over tijd":"");
+    var qb=document.getElementById("qNextBtn");
+    if(qb){ var toon=!!c.startedAt && c.quarter<4;
+      qb.style.display=toon?"":"none";
+      if(toon){ qb.textContent="Start kwart "+(c.quarter+1)+" \u25B6"; qb.classList.toggle("due",over>=1||(!c.running&&(c.qElapsed||0)>=qTargetOf(c)-60)); } }
     var sb=document.getElementById("startBtn");
     if(sb){sb.textContent=c.running?"Pauze":(c.elapsed>0?"Hervat":"Start");sb.classList.toggle("play",!c.running);}
     // Aangever en stopper worden per veldje bekeken: elk team heeft ze nodig.
@@ -1168,7 +1284,7 @@
     var m = {
       id:"m_"+Date.now(), label:"Test "+naam+(two?" (2 velden)":""), opponent:"", thuis:true, test:true, format:fmt,
       pitches: two ? TEST_PITCHES.map(function(t){return {id:t.id,name:t.name};}) : null,
-      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qCap:1170, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
+      date:new Date().toISOString(), running:false, elapsed:0, qElapsed:0, quarter:1, qTarget:1050, qBeeped:false, lastTick:Date.now(), selectedId:null, groups:[], rules:[], talk:[], goals:[],
       players: state.roster.map(function(r){return {id:r.id,rosterId:r.id,name:r.name,line:r.line,
         present:true,onField:false,pos:null,total:0,stint:0,benchStint:0,aangever:!!r.aangever,stopper:!!r.stopper,guest:false};})
     };
@@ -1634,6 +1750,9 @@
       case "preset-del": delPreset(id); break;
       case "undo": doUndo(); break;
       case "next-quarter": nextQuarter(); break;
+      case "q-next": startNextQuarter(id==="trim"); break;
+      case "q-finish": doFinish(id==="trim"); break;
+      case "q-cancel": qModal=null; renderMatch(); break;
       case "card-open": if(cur().selectedId){ cardOpen=true; cornerOpen=false; renderMatch(); } else toast("Kies eerst een speler"); break;
       case "card-pick": applyCard(id); break;
       case "card-close": cardOpen=false; renderMatch(); break;
@@ -1666,7 +1785,7 @@
       case "open-versie": go("versie"); break;
       case "sync-save": syncSave(); break;
       case "sync-now": syncNow(true); break;
-      case "home": grpMode=false; activeGroup=null; rolMode=false; activeRole=null; matchGrp=false; cornerOpen=false; cardOpen=false; scoreOpen=false; goalEdit=null; coachMode=false; warnMuted=false; if(coachTimer){clearTimeout(coachTimer);coachTimer=null;} save(true); go("home"); break;
+      case "home": grpMode=false; activeGroup=null; rolMode=false; activeRole=null; matchGrp=false; cornerOpen=false; cardOpen=false; scoreOpen=false; goalEdit=null; qModal=null; coachMode=false; warnMuted=false; if(coachTimer){clearTimeout(coachTimer);coachTimer=null;} save(true); go("home"); break;
       case "to-match": commitLineup(); go("match"); break;
       case "start-toggle": startToggle(); break;
       case "setup-open": matchGrp=false; activeGroup=null; go("opstelling"); break;
@@ -2080,29 +2199,48 @@
 
   // ---------- tick ----------
   // De klok loopt door in elk scherm (ook in Opstelling) en telt ook de tijd
-  // dat de tablet sliep of de app op de achtergrond stond. Een kwart telt
-  // nooit verder dan de kwartgrens, dus een vergeten klok loopt niet weg.
+  // dat de tablet sliep of de app op de achtergrond stond. Hij stopt niet
+  // vanzelf aan het eind van een kwart: dat doe je zelf met Pauze of met de
+  // knop voor het volgende kwart. Op de streep piept hij, en daarna elke twee
+  // minuten zolang hij over tijd doorloopt.
+  function advance(c,d){
+    var rerender=false; if(d<=0)return false;
+    c.elapsed+=d; c.qElapsed=(c.qElapsed||0)+d;
+    var f=field();for(var i=0;i<f.length;i++){f[i].total+=d;f[i].stint+=d;}
+    var off=c.players.filter(function(p){return !p.pos;});for(var j=0;j<off.length;j++){off[j].benchStint=(off[j].benchStint||0)+d;}
+    var cd=c.players.filter(function(p){return p.card && p.card.type!=="rood" && p.card.secsLeft>0;});
+    for(var m2=0;m2<cd.length;m2++){ cd[m2].card.secsLeft-=d; if(cd[m2].card.secsLeft<=0){ cd[m2].card=null; cd[m2].present=true; rerender=true; beep(); toast(cd[m2].name+" mag terug"); } }
+    return rerender;
+  }
   function tick(){
     var c=cur(); if(!c){ resetLog(); return; }
     logEvents();
     if(c.running){
       var now=Date.now(),d=(now-c.lastTick)/1000;c.lastTick=now;
-      var cap=(c.qCap||1170), room=cap-(c.qElapsed||0);
-      if(d>room) d=Math.max(0,room);
-      var stopNow=false, rerender=false;
-      if(d>0){c.elapsed+=d; c.qElapsed=(c.qElapsed||0)+d;
-        var f=field();for(var i=0;i<f.length;i++){f[i].total+=d;f[i].stint+=d;}
-        var off=c.players.filter(function(p){return !p.pos;});for(var j=0;j<off.length;j++){off[j].benchStint=(off[j].benchStint||0)+d;}
-        if(!c.qBeeped && c.qElapsed>=(c.qTarget||1050)){ c.qBeeped=true; beep(); toast("Kwart "+c.quarter+" op de streep"); }
-        var cd=c.players.filter(function(p){return p.card && p.card.type!=="rood" && p.card.secsLeft>0;});
-        for(var m2=0;m2<cd.length;m2++){ cd[m2].card.secsLeft-=d; if(cd[m2].card.secsLeft<=0){ cd[m2].card=null; cd[m2].present=true; rerender=true; beep(); toast(cd[m2].name+" mag terug"); } }
+      var target=qTargetOf(c), rerender=false, gemist=0;
+      // Lange tijd niet getikt: de app weet niet wat er intussen gebeurde,
+      // dus we tellen hooguit tot de streep door.
+      if(d>GAP_SEC){ var ruimte=Math.max(0,target-(c.qElapsed||0)); if(d>ruimte){ gemist=d-ruimte; d=ruimte; } }
+      if(d>0){
+        var voor=target-(c.qElapsed||0);
+        if(!c.qSnap && d>=voor){
+          // Precies op de streep vastleggen wie hoeveel tijd had.
+          if(voor>0)rerender=advance(c,voor)||rerender;
+          c.qSnap=snapQuarter(c); d-=Math.max(0,voor);
+        }
+        rerender=advance(c,d)||rerender;
+        if(!c.qBeeped && c.qElapsed>=target){ c.qBeeped=true; c.qNextWarn=target+OVER_WARN_SEC; beep(); toast("Kwart "+c.quarter+" op de streep. Zet de klok stil bij het fluitsignaal."); }
+        else if(c.qNextWarn && c.qElapsed>=c.qNextWarn){ c.qNextWarn+=OVER_WARN_SEC; beep(); toast("Kwart "+c.quarter+" loopt al "+fmt(overSecs(c))+" over tijd. Vergeten te stoppen?"); }
       }
-      if((c.qElapsed||0)>=cap){ stopNow=true; }
-      if(stopNow){ c.running=false; beep(); toast("Kwart "+c.quarter+" afgelopen"); save(true); }
+      if(gemist>0){ toast("De app was even weg. Tijd bijgeteld tot "+fmt(target)+", daarna niet."); save(true); }
       else save(false);
       if(state.view==="match"){ if(rerender)renderMatch(); else refreshDynamic(); }
     } else { c.lastTick=Date.now(); }
-    if(c.startedAt && Date.now()-c.startedAt >= MATCH_MAX_MIN*60000){ autoFinishMatch(); }
+    if(c.startedAt){
+      var wand=Date.now()-c.startedAt;
+      var klaar=(c.quarter>=4 && (c.qElapsed||0)>=qTargetOf(c)) || !c.running;
+      if((wand>=MATCH_MAX_MIN*60000 && klaar) || wand>=MATCH_HARD_MIN*60000){ autoFinishMatch(); }
+    }
   }
 
   // ---------- boot ----------
@@ -2119,6 +2257,10 @@
   pullPresets();
   document.addEventListener("visibilitychange",function(){ if(!document.hidden&&cur()){ tick(); if(state.view==="match"||state.view==="opstelling")keepAwake(); } });
   window.addEventListener("beforeunload",function(){save(true);});
+  // Android sluit een app op de achtergrond soms zonder beforeunload; sla
+  // daarom ook op zodra de app uit beeld gaat.
+  window.addEventListener("pagehide",function(){save(true);});
+  document.addEventListener("visibilitychange",function(){ if(document.hidden)save(true); });
 })();
 </script>
 <script>
