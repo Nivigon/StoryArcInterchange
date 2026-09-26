@@ -216,6 +216,8 @@
   .chip{position:relative;background:#fff;border-radius:12px;padding:9px 12px;font-weight:800;font-size:1.02rem;color:#12261a;
     box-shadow:0 1px 3px rgba(0,0,0,.25);touch-action:none;white-space:nowrap;border:2px solid transparent}
   .chip.guest{border-color:var(--lime)}
+  .chip.ingrp .mt,.chip.ingrp .mt2{color:inherit}
+  .chip.ingrp .gdot,.chip.ingrp .rbadge{box-shadow:0 0 0 1.5px #fff}
   .gdots{position:absolute;top:3px;left:5px;display:flex;gap:2px;pointer-events:none}
   .gdot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
   .rbadges{position:absolute;top:3px;right:5px;display:flex;gap:2px;pointer-events:none}
@@ -354,10 +356,14 @@
 <script>
 (function(){
   "use strict";
-  var VERSION = "0.5";
+  var VERSION = "0.6";
   // Overzicht van wat er per versie veranderd is. De nieuwste versie staat
   // bovenaan en is te zien via het versienummer op het startscherm.
   var CHANGELOG = [
+    {v:"0.6", datum:"26 september 2026", punten:[
+      "Spelers in een groepje krijgen de kleur van hun groepje, op het veld, op de bank en bij de opstelling.",
+      "Tijdens de wedstrijd krijgt wie in een groepje het langst staat een donkere tint van de groepskleur."
+    ]},
     {v:"0.5", datum:"26 september 2026", punten:[
       "De klok stopt niet meer vanzelf aan het eind van een kwart; je zet hem zelf stil met Pauze.",
       "Knop Start kwart onderin, met een bevestiging zodat een verkeerde tik niets doet.",
@@ -487,9 +493,15 @@
     return {bg:"rgb("+Math.round(r)+","+Math.round(g)+","+Math.round(b)+")",ink:t>0.45?"#ffffff":"#12261a"};}
   var POSGRP={SPL:"spits",SPR:"spits",LS:"spits",MZL:"mz",MZR:"mz",VML:"vm",VMR:"vm",VL:"achter",VC:"achter",VR:"achter",K:"keeper",
     AAL:"spits",AAR:"spits",MID:"mz",VDL:"achter",VDC:"achter",VDR:"achter"};
-  function rankShade(t){t=Math.max(0,Math.min(1,t));var a=[255,255,255],b=[31,41,55];
-    var r=Math.round(a[0]+(b[0]-a[0])*t),g=Math.round(a[1]+(b[1]-a[1])*t),bl=Math.round(a[2]+(b[2]-a[2])*t);
-    return {bg:"rgb("+r+","+g+","+bl+")",ink:t>0.5?"#ffffff":"#12261a"};}
+  function rankShade(t,color){t=Math.max(0,Math.min(1,t));var a=[255,255,255],b=[31,41,55];
+    // Spelers in een groepje houden hun groepskleur; alleen wie het langst staat krijgt een donkere tint.
+    if(color){var c=hexRgb(color);a=c;b=mixRgb(c,[0,0,0],0.55);t=t>=1?1:0;}
+    var rgb=mixRgb(a,b,t);
+    return {bg:"rgb("+rgb.join(",")+")",ink:inkFor(rgb)};}
+  function hexRgb(h){h=h.replace("#","");return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+  function mixRgb(a,b,t){return [0,1,2].map(function(i){return Math.round(a[i]+(b[i]-a[i])*t);});}
+  function inkFor(rgb){var l=rgb.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});
+    return (0.2126*l[0]+0.7152*l[1]+0.0722*l[2])>0.45?"#12261a":"#ffffff";}
   function levelShades(list){
     var arr=list.slice().sort(function(a,b){return b.stint-a.stint;});
     var levels=[]; arr.forEach(function(p){var k=Math.round(p.stint); if(!levels.length||levels[levels.length-1]!==k)levels.push(k);});
@@ -500,9 +512,9 @@
   }
   function fieldShades(){
     var c=cur(), groups=(c&&c.groups)||[], fld=field(), map={}, covered={};
-    function apply(list){ var r=levelShades(list);
+    function apply(list,color){ var r=levelShades(list);
       Object.keys(r).forEach(function(pid){ var t=r[pid].t;
-        if(!map[pid]||t>map[pid]._t){var sh=rankShade(t);map[pid]={bg:sh.bg,ink:sh.ink,longest:r[pid].longest,_t:t};}
+        if(!map[pid]||t>map[pid]._t){var sh=rankShade(t,color);map[pid]={bg:sh.bg,ink:sh.ink,longest:r[pid].longest,_t:t};}
         if(r[pid].longest)map[pid].longest=true;
       });
     }
@@ -511,7 +523,7 @@
     groups.forEach(function(g){ pitches().forEach(function(t){
       var list=fld.filter(function(p){return g.members.indexOf(p.id)>=0 && teamOf(p)===t.id;});
       if(!list.length)return;
-      list.forEach(function(p){covered[p.id]=true;}); apply(list); }); });
+      list.forEach(function(p){covered[p.id]=true;}); apply(list,g.color); }); });
     var byPos={}; fld.forEach(function(p){ if(covered[p.id])return; var gg=teamOf(p)+"|"+(POSGRP[p.pos]||"x"); (byPos[gg]=byPos[gg]||[]).push(p);});
     Object.keys(byPos).forEach(function(gg){ apply(byPos[gg]); });
     return map;
@@ -892,6 +904,9 @@
   function playerGroups(pid){return ((cur()&&cur().groups)||[]).filter(function(g){return g.members.indexOf(pid)>=0;});}
   function groupDots(pid){var gs=playerGroups(pid);if(!gs.length)return "";
     return '<span class="gdots">'+gs.map(function(g){return '<span class="gdot" style="background:'+g.color+'"></span>';}).join("")+'</span>';}
+  // Balkje in de kleur van het groepje, zodat je in een oogopslag ziet wie bij elkaar hoort.
+  function groupFill(p){var gs=playerGroups(p.id);return gs.length?'background:'+gs[0].color+';color:'+inkFor(hexRgb(gs[0].color))+';':'';}
+  function groupCls(p){return playerGroups(p.id).length?" ingrp":"";}
   function nextColor(){var used=((cur().groups)||[]).map(function(g){return g.color;});
     for(var i=0;i<GROUPCOLORS.length;i++)if(used.indexOf(GROUPCOLORS[i])<0)return GROUPCOLORS[i];
     return GROUPCOLORS[((cur().groups||[]).length)%GROUPCOLORS.length];}
@@ -1080,7 +1095,7 @@
     var c=cur(); var b=bench(t); b.sort(function(a,b2){return a.total-b2.total;});
     if(!b.length)return {n:0,html:'<span class="tb-empty">Geen wissels</span>'};
     var html=b.map(function(p){var cls="chip mbench"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-in";
-      return '<div class="'+cls+'" style="'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+'<span class="mn">'+esc(p.name)+'</span><span class="mt">bank '+fmt(p.benchStint||0)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';}).join("");
+      return '<div class="'+cls+groupCls(p)+'" style="'+groupFill(p)+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+'<span class="mn">'+esc(p.name)+'</span><span class="mt">bank '+fmt(p.benchStint||0)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';}).join("");
     return {n:b.length,html:html};
   }
   function uitStripInner(){
@@ -1171,7 +1186,7 @@
         var p=placed[pos.id];
         if(p){
           var cls="chip on mfield"; if(!matchGrp && c.selectedId===p.id)cls+=" sel-out";
-          dots+='<div class="'+cls+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
+          dots+='<div class="'+cls+groupCls(p)+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+groupFill(p)+(matchGrp?findGroupOutline(p):'')+'" data-player="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+
             '<span class="mn">'+esc(p.name)+'</span><span class="mt">'+fmt(p.stint)+'</span><span class="mt2">tot '+fmt(p.total)+'</span></div>';
         } else {
           dots+='<div class="dot open" style="left:'+pos.x+'%;top:'+pos.y+'%" data-emptypos="'+pos.id+'" data-team="'+tm+'"></div>';
@@ -1257,7 +1272,8 @@
         var m2=el.querySelector(".mt2"); if(m2)m2.textContent="tot "+fmt(p.total);
         var s=shades[p.id];
         if(warm && s){ el.style.background=s.bg; el.style.color=s.ink; el.classList.toggle("longest",!!s.longest); }
-        else { el.style.background="#ffffff"; el.style.color="#12261a"; el.classList.remove("longest"); }
+        else { var gs=playerGroups(p.id), gc=gs.length?gs[0].color:null;
+          el.style.background=gc||"#ffffff"; el.style.color=gc?inkFor(hexRgb(gc)):"#12261a"; el.classList.remove("longest"); }
       }
       else if(el.classList.contains("carded")){ var ct=el.querySelector(".cardtime"); if(ct&&p.card)ct.textContent=(p.card.type==="rood"?"rood":fmt(Math.max(0,p.card.secsLeft))); }
       else { if(mt)mt.textContent="bank "+fmt(p.benchStint||0);
@@ -1361,14 +1377,14 @@
       if(rolMode && activeRole && p[activeRole]) return 'outline:3px solid '+ROLE_COLORS[activeRole]+';outline-offset:1px;';
       return '';
     }
-    function chipHTML(p){ return '<div class="chip'+(p.guest?" guest":"")+'" style="'+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+    function chipHTML(p){ return '<div class="chip'+(p.guest?" guest":"")+groupCls(p)+'" style="'+groupFill(p)+actOutline(p)+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
     // Een veldje met zijn eigen plekken. Bij een gewone wedstrijd is dat er maar een.
     function pitchHTML(tm){
       var placed={}; c.players.forEach(function(p){ if(p.pos && teamOf(p)===tm)placed[p.pos]=p; });
       var dots="";
       positions().forEach(function(pos){
         var p=placed[pos.id], tgt=posTarget(tm,pos.id);
-        if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+actOutline(p)+'" data-drop="'+tgt+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
+        if(p){ dots+='<div class="chip on'+(p.guest?" guest":"")+groupCls(p)+'" style="left:'+pos.x+'%;top:'+pos.y+'%;'+groupFill(p)+actOutline(p)+'" data-drop="'+tgt+'" data-drag="'+p.id+'">'+groupDots(p.id)+roleBadges(p)+esc(p.name)+'</div>'; }
         else { dots+='<div class="dot" style="left:'+pos.x+'%;top:'+pos.y+'%" data-drop="'+tgt+'"></div>'; }
       });
       return '<div class="pitch" data-pitch="'+tm+'">'+pitchSVG()+dots+'</div>';
@@ -1458,7 +1474,7 @@
     return '<div class="legend"><div class="rl-h">LEGENDA</div>'+
       '<div class="lg-ex"><span class="lgchip long">naam</span><span class="lg-txt"><b>staat het langst in de groep</b> &middot; deze wissel je als eerste</span></div>'+
       '<div class="lg-ex"><span class="lgchip">naam</span><span class="lg-txt">net in het veld</span></div>'+
-      '<div class="lg-ex"><span class="gdot lg-dot" style="background:#2b6cff"></span><span class="lg-txt">zelfde gekleurde stip = zelfde wisselgroep</span></div>'+
+      '<div class="lg-ex"><span class="lgchip" style="position:relative;background:#2b6cff;color:#fff"><span class="gdots"><span class="gdot" style="background:#2b6cff"></span></span>naam</span><span class="lg-txt">zelfde kleur = zelfde wisselgroep &middot; donkere tint = staat het langst</span></div>'+
       '</div>';
   }
   function cornerBox(){
