@@ -365,6 +365,8 @@
       "Herinneringspiep elke 2 minuten zolang een kwart over tijd doorloopt.",
       "Was de app lang weg (tablet uit, app afgesloten), dan telt de tijd niet verder dan het eind van het kwart.",
       "Een gepauzeerde klok knippert, zodat per ongeluk pauzeren opvalt.",
+      "Een wedstrijd wordt niet meer automatisch afgerond terwijl de klok op pauze staat, tenzij hij 3 uur stilstaat.",
+      "Een begonnen wedstrijd wordt bij Nieuwe wedstrijd eerst opgeslagen in plaats van weggegooid.",
       "Waarschuwing als opslaan op de tablet niet lukt."
     ]},
     {v:"0.4", datum:"18 september 2026", punten:[
@@ -416,13 +418,18 @@
   // of op de eigen bank, en de klok en de kwarten gelden voor allebei.
   var TEST_PITCHES = [{id:"A",name:"Veld A"},{id:"B",name:"Veld B"}];
   var STINT_FULL = 8 * 60;
-  // Veiligheidsnet: zoveel minuten na de eerste keer Start wordt een
-  // vergeten wedstrijd vanzelf afgerond en opgeslagen (4 x 17,5 plus pauzes
-  // is ongeveer 84 minuten, dus hier zit ruimte voor een late start).
-  var MATCH_MAX_MIN = 110;
-  // Harde grens voor als de wedstrijd niet in kwart 4 is afgelopen of niet
-  // stilstaat: dan pas na zoveel minuten automatisch afronden.
-  var MATCH_HARD_MIN = 180;
+  // Veiligheidsnet voor een vergeten wedstrijd. Nooit op wandtijd sinds de
+  // aftrap, want een lange blessurepauze of late start mag de wedstrijd niet
+  // midden in het spel afronden.
+  // - Klok staat stil: dan telt er geen tijd bij en is er geen haast. Pas als
+  //   hij zo lang stilstaat is de wedstrijd zeker voorbij.
+  var PAUSE_MAX_MIN = 180;
+  // - Klok loopt in kwart 4 zoveel minuten over de streep: stoppen vergeten.
+  //   Kwart 4 telt dan tot de streep.
+  var Q4_OVER_MAX_MIN = 20;
+  // - Klok loopt in een ander kwart zoveel minuten over de streep: ook
+  //   vergeten (of er wordt nooit van kwart gewisseld). Dan niets eraf.
+  var ANY_OVER_MAX_MIN = 90;
   // Loopt een kwart over tijd door, dan piept de app elke zoveel seconden.
   var OVER_WARN_SEC = 120;
   // Heeft de app langer dan dit niet getikt (tablet uit, app afgesloten), dan
@@ -895,7 +902,11 @@
   function selGroup(id){activeGroup=activeGroup===id?null:id;reRenderGroups();}
   function newMatch(){
     var c=cur();
-    if(c && !confirm("Er staat nog een wedstrijd open ("+c.label+"). Die wordt weggegooid als je een nieuwe start en komt niet bij oude wedstrijden. Toch een nieuwe wedstrijd?")) return;
+    if(c && c.startedAt){
+      // Een begonnen wedstrijd gooien we nooit weg: die wordt eerst opgeslagen.
+      if(!confirm("Er staat nog een wedstrijd open ("+c.label+"). Die wordt eerst afgerond en opgeslagen bij oude wedstrijden. Nieuwe wedstrijd starten?")) return;
+      archiveMatch(c,true); syncNow(false);
+    } else if(c && !confirm("Er staat nog een opstelling open ("+c.label+") die nog niet begonnen is. Die wordt weggegooid. Toch een nieuwe wedstrijd?")) return;
     newThuis=true; go("nieuw"); }
   function createMatch(){
     var opp=(document.getElementById("oppName").value||"").trim();
@@ -1009,15 +1020,15 @@
     if(c.running && c.quarter>=4)trimQuarter(c);
     c.autoFinished=true;
     archiveMatch(c);
-    toast("Wedstrijd na "+MATCH_MAX_MIN+" minuten automatisch afgerond en opgeslagen"); syncNow(false);
+    toast("Vergeten wedstrijd automatisch afgerond en opgeslagen"); syncNow(false);
   }
-  function archiveMatch(c){
+  function archiveMatch(c,blijf){
     c.running=false; c.selectedId=null; c.finished=new Date().toISOString();
     matchGrp=false; activeGroup=null; coachMode=false; warnMuted=false; goalEdit=null; qModal=null;
     state.history.unshift(JSON.parse(JSON.stringify(c)));
     queueMatch(c.id);
     undoStack=[]; resetLog(); releaseWake();
-    state.current=null; state.detailId=c.id; save(true); go("detail");
+    state.current=null; state.detailId=c.id; save(true); if(!blijf)go("detail");
   }
 
   // ---------- render router ----------
@@ -2236,10 +2247,12 @@
       else save(false);
       if(state.view==="match"){ if(rerender)renderMatch(); else refreshDynamic(); }
     } else { c.lastTick=Date.now(); }
+    if(c.running) c.pausedAt=null; else if(!c.pausedAt) c.pausedAt=Date.now();
     if(c.startedAt){
-      var wand=Date.now()-c.startedAt;
-      var klaar=(c.quarter>=4 && (c.qElapsed||0)>=qTargetOf(c)) || !c.running;
-      if((wand>=MATCH_MAX_MIN*60000 && klaar) || wand>=MATCH_HARD_MIN*60000){ autoFinishMatch(); }
+      var nu=Date.now(), klaar;
+      if(!c.running) klaar = nu-c.pausedAt >= PAUSE_MAX_MIN*60000;
+      else klaar = (c.quarter>=4 && overSecs(c) >= Q4_OVER_MAX_MIN*60) || overSecs(c) >= ANY_OVER_MAX_MIN*60;
+      if(klaar) autoFinishMatch();
     }
   }
 
